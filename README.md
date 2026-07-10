@@ -39,3 +39,4 @@ The vault already lives in iCloud and I want to keep it that way. This project i
 ## Implementation
 
 - [Architecture decisions](docs/architecture-decisions.md)
+- [Setup, isolated acceptance test, and recovery guide](docs/usage.md)
