@@ -35,3 +35,7 @@ The vault already lives in iCloud and I want to keep it that way. This project i
 - snapshots are encrypted at rest
 - restore steps are documented and verified
 - solution fits into the Mega free tier, at least for the current vault size
+
+## Implementation
+
+- [Architecture decisions](docs/architecture-decisions.md)
