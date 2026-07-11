@@ -55,6 +55,11 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 - Keep `find`/`stat` fingerprinting and its transient retries for manual backups
   only. Scheduled runs let Kopia enumerate the iCloud source under its narrow
   macOS File Provider permission and must not require Full Disk Access for Bash.
+- Before installing a schedule for an iCloud source, run an attended,
+  one-time launchd preflight using `kopia snapshot estimate`. Explain the macOS
+  prompt first, persist only successful check metadata, and provide
+  `--check-icloud-access` for retrying after a denial or Kopia upgrade. The
+  preflight must not create a snapshot or mutate the repository.
 - Include the whole vault, including `.obsidian/`.
 - Keep 14 daily, 8 weekly, and 12 monthly snapshots.
 - Use Kopia's encrypted repository defaults; do not add a second encryption layer.

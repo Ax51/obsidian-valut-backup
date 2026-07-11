@@ -61,8 +61,10 @@ During the first run, the script:
 6. creates or connects to an encrypted Kopia repository;
 7. offers to add the `obsidian-backup` command through a Homebrew `bin`
    symlink;
-8. runs the first backup immediately; and
-9. installs one `launchd` schedule without creating duplicates.
+8. for an iCloud source, explains and runs a one-time background Kopia access
+   check so the macOS permission request appears while the user is present;
+9. runs the first backup immediately; and
+10. installs one `launchd` schedule without creating duplicates.
 
 After acceptance, the script records `DISCLAIMER_ACCEPTED=true` and an
 acceptance timestamp in `~/.config/obsidian-vault-backup/settings.sh`. Later
@@ -100,6 +102,7 @@ prompt directly.
 --update-settings      Update saved settings and credentials interactively.
 --verify               Verify 100% of snapshot files after the backup.
 --restore              Restore the latest snapshot into the saved source.
+--check-icloud-access  Repeat the background Kopia permission check.
 --inspect              Show configuration and schedule status without changes.
 --version              Show the script version.
 -h, --help             Show built-in help.

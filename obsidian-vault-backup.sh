@@ -5,7 +5,7 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="1.1.0"
+readonly SCRIPT_VERSION="1.2.2"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
 readonly SYSTEM_USER="$(id -un)"
@@ -14,10 +14,14 @@ readonly SETTINGS_FILE="$APP_DIR/settings.sh"
 readonly KOPIA_CONFIG_FILE="$APP_DIR/repository.config"
 readonly LOG_FILE="$APP_DIR/backup.log"
 readonly STATE_FILE="$APP_DIR/state.sh"
+readonly ICLOUD_PERMISSION_STATE_FILE="$APP_DIR/icloud-permission-state.sh"
+readonly ICLOUD_PERMISSION_LOG_FILE="$APP_DIR/icloud-permission.log"
 readonly LOCK_DIR="$APP_DIR/backup.lock"
 readonly INSTALLED_SCRIPT="$APP_DIR/$APP_NAME.sh"
 readonly LAUNCHD_LABEL="com.$SYSTEM_USER.obsidian-vault-backup"
 readonly LAUNCHD_PLIST="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
+readonly ICLOUD_PERMISSION_LABEL="$LAUNCHD_LABEL.icloud-permission-check"
+readonly ICLOUD_PERMISSION_PLIST="$APP_DIR/$ICLOUD_PERMISSION_LABEL.plist"
 readonly KEYCHAIN_SERVICE="$LAUNCHD_LABEL.kopia"
 readonly KEYCHAIN_ACCOUNT="repository-password"
 readonly DEFAULT_REMOTE_NAME="mega"
@@ -51,6 +55,8 @@ INSPECT_STATUS=false
 RESTORE_MODE=false
 RESTORE_STAGING_DIR=""
 SCHEDULED_RUN=false
+ICLOUD_PERMISSION_RUN=false
+CHECK_ICLOUD_ACCESS=false
 FIRST_CONFIGURATION=false
 REPOSITORY_CONNECTION_CHANGED=false
 
@@ -72,6 +78,10 @@ warn() {
 die() {
   printf 'Error: %s\n' "$*" >&2
   exit 1
+}
+
+is_background_run() {
+  [[ "$SCHEDULED_RUN" == true || "$ICLOUD_PERMISSION_RUN" == true ]]
 }
 
 prompt_value() {
@@ -180,7 +190,7 @@ record_disclaimer_acceptance() {
 ensure_disclaimer_acceptance() {
   [[ "$DISCLAIMER_ACCEPTED" == true ]] && return 0
 
-  if [[ "$SCHEDULED_RUN" == true ]]; then
+  if is_background_run; then
     die "Disclaimer acceptance is missing. Run the script manually first."
   fi
 
@@ -262,6 +272,7 @@ Options:
   --update-settings      Interactively update saved settings and credentials.
   --verify               Verify 100% of snapshot files after the backup.
   --restore              Restore from the latest snapshot into the saved source.
+  --check-icloud-access  Run the background Kopia permission check again.
   --inspect              Show configuration and schedule status without changes.
   --version              Show the script version.
   -h, --help             Show this help.
@@ -275,6 +286,7 @@ Examples:
   ./obsidian-vault-backup.sh --source /tmp/TestVault --no-schedule
   ./obsidian-vault-backup.sh --update-settings
   ./obsidian-vault-backup.sh --restore
+  ./obsidian-vault-backup.sh --check-icloud-access
   ./obsidian-vault-backup.sh --inspect
 EOF
   printf '\nFull documentation:\n  %s\n' "$PROJECT_URL"
@@ -322,6 +334,18 @@ parse_arguments() {
         INSTALL_SCHEDULE=false
         shift
         ;;
+      --icloud-permission-run)
+        ICLOUD_PERMISSION_RUN=true
+        IMMEDIATE_BACKUP=false
+        INSTALL_SCHEDULE=false
+        shift
+        ;;
+      --check-icloud-access)
+        CHECK_ICLOUD_ACCESS=true
+        IMMEDIATE_BACKUP=false
+        INSTALL_SCHEDULE=false
+        shift
+        ;;
       --version)
         printf '%s %s\n' "$APP_NAME" "$SCRIPT_VERSION"
         exit 0
@@ -338,6 +362,18 @@ parse_arguments() {
 }
 
 validate_argument_combinations() {
+  if [[ "$ICLOUD_PERMISSION_RUN" == true ]]; then
+    [[ "$SCHEDULED_RUN" == false && "$RESTORE_MODE" == false && \
+       "$INSPECT_STATUS" == false && "$UPDATE_SETTINGS" == false && \
+       "$CHECK_ICLOUD_ACCESS" == false ]] || die \
+      "The internal iCloud permission mode cannot be combined with other actions."
+  fi
+  if [[ "$CHECK_ICLOUD_ACCESS" == true ]]; then
+    [[ "$SCHEDULED_RUN" == false && "$RESTORE_MODE" == false && \
+       "$INSPECT_STATUS" == false && "$UPDATE_SETTINGS" == false && \
+       "$VERIFY_AFTER_BACKUP" == false && -z "$CLI_SOURCE_PATH" ]] || die \
+      "--check-icloud-access must be run as a separate command."
+  fi
   if [[ "$RESTORE_MODE" == true ]]; then
     [[ "$SCHEDULED_RUN" == false ]] || die "--restore cannot run through launchd."
     [[ "$VERIFY_AFTER_BACKUP" == false ]] || die \
@@ -772,6 +808,64 @@ ensure_repository_connection() {
   fi
 }
 
+require_existing_repository_connection() {
+  keychain_password >/dev/null 2>&1 || die \
+    "Kopia password is missing from Keychain. Run the script normally first."
+  [[ -f "$KOPIA_CONFIG_FILE" ]] || die \
+    "Kopia repository is not connected. Run the script normally first."
+  kopia_run repository status >/dev/null 2>&1 || die \
+    "Kopia repository connection is invalid. Run the script normally to reconnect."
+  success "Connected to the existing Kopia repository"
+}
+
+is_icloud_source() {
+  case "$1" in
+    "$HOME/Library/Mobile Documents/"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+kopia_permission_identity() {
+  "$KOPIA_BIN" --version 2>/dev/null | sed -n '1p'
+}
+
+icloud_permission_state_is_current() {
+  local ICLOUD_PERMISSION_KOPIA_IDENTITY=""
+  local ICLOUD_PERMISSION_SOURCE=""
+
+  [[ -f "$ICLOUD_PERMISSION_STATE_FILE" ]] || return 1
+  # Generated by this script and readable only by the current user.
+  # shellcheck disable=SC1090
+  source "$ICLOUD_PERMISSION_STATE_FILE"
+  [[ "$ICLOUD_PERMISSION_KOPIA_IDENTITY" == "$(kopia_permission_identity)" && \
+     "$ICLOUD_PERMISSION_SOURCE" == "$SOURCE_PATH" ]]
+}
+
+record_icloud_permission_success() {
+  local temporary_file="$ICLOUD_PERMISSION_STATE_FILE.tmp"
+  umask 077
+  {
+    printf '# Generated by %s.\n' "$APP_NAME"
+    printf 'ICLOUD_PERMISSION_KOPIA_IDENTITY=%q\n' "$(kopia_permission_identity)"
+    printf 'ICLOUD_PERMISSION_SOURCE=%q\n' "$SOURCE_PATH"
+    printf 'ICLOUD_PERMISSION_CHECKED_AT=%q\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  } > "$temporary_file"
+  mv "$temporary_file" "$ICLOUD_PERMISSION_STATE_FILE"
+  chmod 600 "$ICLOUD_PERMISSION_STATE_FILE"
+}
+
+run_icloud_permission_probe() {
+  [[ -f "$KOPIA_CONFIG_FILE" ]] || die \
+    "Kopia repository is not connected. Run the script manually first."
+  keychain_password >/dev/null 2>&1 || die \
+    "Kopia password is missing from Keychain. Run the script manually first."
+
+  info "Checking Kopia access to the configured iCloud vault"
+  kopia_run snapshot estimate --quiet "$SOURCE_PATH"
+  record_icloud_permission_success
+  success "Kopia can read the iCloud vault in a background launchd process"
+}
+
 
 # ====== 7. Immediate and scheduled backup ====================================
 
@@ -988,6 +1082,112 @@ xml_escape() {
   printf '%s' "$value"
 }
 
+write_icloud_permission_plist() {
+  local script_xml=""
+  local log_xml=""
+  script_xml="$(xml_escape "$INSTALLED_SCRIPT")"
+  log_xml="$(xml_escape "$ICLOUD_PERMISSION_LOG_FILE")"
+
+  umask 077
+  {
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+    printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    printf '%s\n' '<plist version="1.0">'
+    printf '%s\n' '<dict>'
+    printf '  <key>Label</key><string>%s</string>\n' "$ICLOUD_PERMISSION_LABEL"
+    printf '  <key>ProgramArguments</key><array><string>%s</string><string>--icloud-permission-run</string></array>\n' "$script_xml"
+    printf '%s\n' '  <key>RunAtLoad</key><true/>'
+    printf '  <key>StandardOutPath</key><string>%s</string>\n' "$log_xml"
+    printf '  <key>StandardErrorPath</key><string>%s</string>\n' "$log_xml"
+    printf '%s\n' '</dict>'
+    printf '%s\n' '</plist>'
+  } > "$ICLOUD_PERMISSION_PLIST"
+  chmod 600 "$ICLOUD_PERMISSION_PLIST"
+  plutil -lint "$ICLOUD_PERMISSION_PLIST" >/dev/null
+}
+
+cleanup_icloud_permission_job() {
+  local service="gui/$(id -u)/$ICLOUD_PERMISSION_LABEL"
+  launchctl bootout "$service" >/dev/null 2>&1 || true
+  rm -f "$ICLOUD_PERMISSION_PLIST"
+}
+
+run_icloud_permission_preflight() {
+  local domain="gui/$(id -u)"
+  local service="$domain/$ICLOUD_PERMISSION_LABEL"
+  local attempt=1
+  local max_attempts=150
+  local launch_output=""
+  local launch_state=""
+  local last_exit_code=""
+
+  rm -f "$ICLOUD_PERMISSION_STATE_FILE" "$ICLOUD_PERMISSION_LOG_FILE"
+  cleanup_icloud_permission_job
+  write_icloud_permission_plist
+  trap 'cleanup_icloud_permission_job' EXIT
+  trap 'exit 130' INT TERM
+  launchctl bootstrap "$domain" "$ICLOUD_PERMISSION_PLIST"
+  info "Waiting up to 5 minutes for the background check and any macOS permission response"
+
+  while (( attempt <= max_attempts )); do
+    [[ -f "$ICLOUD_PERMISSION_STATE_FILE" ]] && break
+    launch_output="$(launchctl print "$service" 2>/dev/null || true)"
+    launch_state="$(printf '%s\n' "$launch_output" | \
+      awk -F'= ' '/^[[:space:]]*state =/ { print $2; exit }')"
+    last_exit_code="$(printf '%s\n' "$launch_output" | \
+      awk -F'= ' '/^[[:space:]]*last exit code =/ { print $2; exit }')"
+    if [[ -n "$last_exit_code" && "$last_exit_code" != "(never exited)" && \
+          "$last_exit_code" != "0" && "$launch_state" != "running" ]]; then
+      break
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+
+  cleanup_icloud_permission_job
+  trap - EXIT INT TERM
+
+  if icloud_permission_state_is_current; then
+    success "Kopia background iCloud access is ready"
+    return 0
+  fi
+
+  warn "Kopia could not confirm background access to the iCloud vault."
+  [[ -f "$ICLOUD_PERMISSION_LOG_FILE" ]] && \
+    warn "Permission-check log: $ICLOUD_PERMISSION_LOG_FILE"
+  return 1
+}
+
+ensure_icloud_permission_preflight() {
+  local force_check="${1:-false}"
+
+  if ! is_icloud_source "$SOURCE_PATH"; then
+    [[ "$force_check" == true ]] && \
+      success "The configured source is not in iCloud Drive; no permission check is needed"
+    return 0
+  fi
+  if [[ "$force_check" == false ]] && icloud_permission_state_is_current; then
+    success "Kopia background iCloud access was already confirmed"
+    return 0
+  fi
+
+  info "iCloud background access"
+  cat <<EOF
+The daily launchd job needs Kopia to read files managed by iCloud Drive.
+macOS may now show a system dialog saying that Kopia wants to access iCloud.
+Choose Allow to enable unattended backups. This grants File Provider access to
+Kopia only; it does not grant Full Disk Access to Bash.
+EOF
+
+  if [[ "$force_check" == false ]]; then
+    confirm "Run the background Kopia permission check now?" || die \
+      "Permission setup stopped and no schedule changes were made. An existing job remains active. Run with --check-icloud-access when ready."
+  fi
+
+  run_icloud_permission_preflight || die \
+    "Allow Kopia under System Settings → Privacy & Security → Files & Folders, then run with --check-icloud-access."
+}
+
 write_launchd_plist() {
   local script_xml=""
   local log_xml=""
@@ -1103,6 +1303,15 @@ inspect_status() {
       else
         printf '  Source status: unavailable\n'
       fi
+      if is_icloud_source "$SOURCE_PATH"; then
+        if [[ -f "$ICLOUD_PERMISSION_STATE_FILE" ]]; then
+          printf '  Kopia iCloud background access: confirmed by preflight\n'
+        else
+          printf '  Kopia iCloud background access: preflight not completed\n'
+        fi
+      else
+        printf '  Kopia iCloud background access: not applicable\n'
+      fi
     fi
     printf '  Repository remote: %s:%s\n' "${REMOTE_NAME:-?}" "${REMOTE_PATH:-?}"
     printf '  Daily schedule time: %s local time\n' "${SCHEDULE_TIME:-?}"
@@ -1191,7 +1400,8 @@ main() {
   ensure_disclaimer_acceptance
 
   if [[ -n "${SOURCE_PATH:-}" && "$SOURCE_PATH" != /* ]]; then
-    if [[ "$SCHEDULED_RUN" == true || "$RESTORE_MODE" == true ]]; then
+    if [[ "$SCHEDULED_RUN" == true || "$ICLOUD_PERMISSION_RUN" == true || \
+          "$RESTORE_MODE" == true ]]; then
       die "Saved source path is relative: $SOURCE_PATH. Run the script manually to update settings."
     fi
     warn "Saved source path is relative and ambiguous: $SOURCE_PATH"
@@ -1202,6 +1412,19 @@ main() {
 
   mkdir -p "$APP_DIR"
   chmod 700 "$APP_DIR"
+
+  if [[ "$ICLOUD_PERMISSION_RUN" == true ]]; then
+    [[ "$PPID" -eq 1 && -f "$ICLOUD_PERMISSION_PLIST" ]] || die \
+      "The internal iCloud permission mode must be started by its temporary launchd job."
+    add_homebrew_to_path
+    KOPIA_BIN="$(command -v kopia || true)"
+    RCLONE_BIN="$(command -v rclone || true)"
+    [[ -x "$KOPIA_BIN" && -x "$RCLONE_BIN" ]] || die \
+      "kopia or rclone is missing. Run the script manually."
+    validate_effective_settings
+    run_icloud_permission_probe
+    exit 0
+  fi
 
   if [[ "$SCHEDULED_RUN" == true ]]; then
     add_homebrew_to_path
@@ -1233,11 +1456,23 @@ main() {
   fi
   apply_cli_overrides
   validate_effective_settings
+
+  if [[ "$CHECK_ICLOUD_ACCESS" == true ]]; then
+    require_existing_repository_connection
+    ensure_icloud_permission_preflight true
+    exit 0
+  fi
+
   ensure_repository_connection
 
   if [[ "$RESTORE_MODE" == true ]]; then
     run_restore
     exit 0
+  fi
+
+  if [[ -z "$CLI_SOURCE_PATH" && \
+        ( "$INSTALL_SCHEDULE" == true || -f "$LAUNCHD_PLIST" ) ]]; then
+    ensure_icloud_permission_preflight false
   fi
 
   if [[ "$IMMEDIATE_BACKUP" == true ]]; then

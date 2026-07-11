@@ -30,8 +30,10 @@ The first run:
 7. stores the Kopia repository password in macOS Keychain;
 8. creates or connects to the encrypted repository;
 9. offers to install the `obsidian-backup` shell command;
-10. runs a backup immediately; and
-11. installs one `launchd` schedule if it is not already present.
+10. for an iCloud source, explains and runs a one-time background Kopia access
+    check while the user is present;
+11. runs a backup immediately; and
+12. installs one `launchd` schedule if it is not already present.
 
 Acceptance and its UTC timestamp are stored in `settings.sh`, so the disclaimer
 is not shown again after the user agrees. Declining does not write an acceptance
@@ -69,12 +71,13 @@ KopiaUI destination fields require raw, unescaped paths; see the
 | `--update-settings` | Rewrites `settings.sh` with the resulting values and may update rclone or Keychain credentials. | By itself, it is followed by an immediate backup and schedule reconciliation. |
 | `--verify` | Does not change saved settings. | After a successful immediate backup, downloads, decrypts, and verifies 100% of snapshot files. It does nothing when the backup is skipped. |
 | `--restore` | Does not change saved settings or retention. | Disables backup and schedule changes, then restores from the latest snapshot into the effective source after interactive warnings. |
+| `--check-icloud-access` | Refreshes the local permission-check state after success. | Runs a one-time launchd probe in which Kopia estimates the source without creating or uploading a snapshot. Use it after initially denying access or after changing the permission in System Settings. |
 | `--inspect` | None. | Prints saved state and exits before dependency checks, repository access, self-update, backup, or schedule changes. Do not combine it with action flags. |
 | `--version` | None. | Prints the running file's version and exits. |
 | `-h`, `--help` | None. | Prints built-in help and exits. |
 
-`--scheduled-run` is an internal launchd argument. It is intentionally omitted
-from public help and must not be used for interactive or manual runs.
+`--scheduled-run` and `--icloud-permission-run` are internal launchd arguments.
+They must not be used for interactive or manual runs.
 
 For `--update-settings`, the value in square brackets is the currently loaded
 value. Press **Return** to keep it. The MEGA and Kopia password questions use
@@ -340,12 +343,35 @@ or Bash. KopiaUI has its own application identity and may ask independently.
 Because Homebrew installs versioned Kopia executables, macOS may ask again
 after a Kopia upgrade.
 
+Before installing a schedule for an iCloud source, the script explains the
+request and asks whether to run a one-time background check. The temporary
+launchd job runs `kopia snapshot estimate`: it enumerates the configured source
+but does not create a snapshot, upload vault contents, or change retention. The
+system dialog therefore appears during attended setup rather than unexpectedly
+at the first daily event. The script cannot grant access or force macOS to show
+the dialog after a decision has already been saved.
+
 The scheduled workflow intentionally lets Kopia be the only process that
 enumerates the vault. Do not grant Full Disk Access to `/bin/bash`, `find`, or
 `stat`; that would give every Bash script or invocation of those shared system
-tools unnecessarily broad access. If Kopia was denied previously, review its
-entry under **System Settings → Privacy & Security → Files & Folders**, then run
-a manual backup once so macOS can present the request again.
+tools unnecessarily broad access. If Kopia was denied previously, open **System
+Settings → Privacy & Security → Files & Folders**, enable access for Kopia, and
+then run:
+
+```bash
+obsidian-backup --check-icloud-access
+```
+
+If the optional shell command was not installed, use:
+
+```bash
+~/.config/obsidian-vault-backup/obsidian-vault-backup.sh \
+  --check-icloud-access
+```
+
+The check is recorded locally for the configured source and Kopia version.
+Run it again after changing the iCloud source, after Homebrew upgrades Kopia,
+or whenever access has been revoked in System Settings.
 
 Apple documents iCloud Drive as a protected file location and explains that
 access is controlled per application in
@@ -387,6 +413,8 @@ schedule.
 ├── settings.sh               source, remote, calendar, and soak settings
 ├── repository.config         Kopia connection metadata
 ├── state.sh                  last successful backup state
+├── icloud-permission-state.sh last successful background access check
+├── icloud-permission.log     most recent background access-check output
 └── backup.log                launchd output
 
 ~/Library/LaunchAgents/
