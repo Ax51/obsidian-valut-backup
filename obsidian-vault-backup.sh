@@ -5,8 +5,9 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="1.2.2"
+readonly SCRIPT_VERSION="1.3.0"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
+readonly REMOTE_SCRIPT_URL="https://raw.githubusercontent.com/Ax51/obsidian-valut-backup/refs/heads/main/obsidian-vault-backup.sh"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
 readonly SYSTEM_USER="$(id -un)"
 readonly APP_DIR="$HOME/.config/$APP_NAME"
@@ -518,6 +519,89 @@ install_script_copy() {
   elif [[ ! -x "$INSTALLED_SCRIPT" ]]; then
     die "Download the script to a file before running it so it can install a persistent copy."
   fi
+}
+
+check_for_remote_update() {
+  local source_file="${BASH_SOURCE[0]:-}"
+  local source_path=""
+  local temporary_script=""
+  local remote_version=""
+
+  info "Checking for a newer script version..."
+
+  command -v curl >/dev/null 2>&1 || {
+    warn "Could not check for a newer script version because curl is unavailable. Continuing."
+    return 0
+  }
+
+  if [[ -z "$source_file" || ! -f "$source_file" ]]; then
+    warn "Could not determine the running script path for an update check. Continuing."
+    return 0
+  fi
+
+  if ! source_path="$(cd "$(dirname "$source_file")" && pwd -P)/$(basename "$source_file")"; then
+    warn "Could not determine the running script path for an update check. Continuing."
+    return 0
+  fi
+
+  while [[ -L "$source_path" ]]; do
+    local link_target=""
+    if ! link_target="$(readlink "$source_path")"; then
+      warn "Could not resolve the running script path for an update check. Continuing."
+      return 0
+    fi
+    [[ -n "$link_target" ]] || {
+      warn "Could not resolve the running script path for an update check. Continuing."
+      return 0
+    }
+    if [[ "$link_target" == /* ]]; then
+      source_path="$link_target"
+    else
+      source_path="$(dirname "$source_path")/$link_target"
+    fi
+    if ! source_path="$(cd "$(dirname "$source_path")" && pwd -P)/$(basename "$source_path")"; then
+      warn "Could not resolve the running script path for an update check. Continuing."
+      return 0
+    fi
+  done
+
+  temporary_script="$source_path.tmp.$$"
+
+  if ! curl -fsSL --connect-timeout 10 --max-time 30 "$REMOTE_SCRIPT_URL" \
+      -o "$temporary_script" 2>/dev/null; then
+    rm -f "$temporary_script"
+    warn "Could not check for a newer script version. Continuing."
+    return 0
+  fi
+
+  remote_version="$(extract_script_version "$temporary_script")"
+  if ! valid_script_version "$remote_version"; then
+    rm -f "$temporary_script"
+    warn "The downloaded script has no valid version. Continuing without updating."
+    return 0
+  fi
+
+  if ! version_is_greater "$remote_version" "$SCRIPT_VERSION"; then
+    rm -f "$temporary_script"
+    success "Script version $SCRIPT_VERSION is current"
+    return 0
+  fi
+
+  info "A newer script version is available: $remote_version (current: $SCRIPT_VERSION)."
+  if ! confirm "Update and restart with version $remote_version?"; then
+    rm -f "$temporary_script"
+    return 0
+  fi
+
+  chmod 700 "$temporary_script"
+  if ! mv "$temporary_script" "$source_path"; then
+    rm -f "$temporary_script"
+    warn "Could not replace the running script. Continuing with version $SCRIPT_VERSION."
+    return 0
+  fi
+
+  success "Updated the running script to version $remote_version"
+  exec "$source_path" "$@"
 }
 
 offer_shell_command() {
@@ -1387,6 +1471,10 @@ main() {
   if [[ "$INSPECT_STATUS" == true ]]; then
     inspect_status
     exit 0
+  fi
+
+  if [[ "$SCHEDULED_RUN" == false && "$ICLOUD_PERMISSION_RUN" == false ]]; then
+    check_for_remote_update "$@"
   fi
 
   if ! load_settings; then

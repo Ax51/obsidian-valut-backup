@@ -93,9 +93,14 @@ copy. It never modifies shell startup files or replaces an existing command.
 Declining the offer is persisted, while `--update-settings` provides an explicit
 way to receive the offer again.
 
-The script carries a semantic version. Manual runs atomically refresh the
-installed copy only when the running version is newer. Equal versions are a
-no-op, while an older copy is prevented from overwriting a newer installation.
+The script carries a semantic version. Action-oriented manual runs compare it
+with the latest script on the project's GitHub branch and offer to atomically
+replace and restart the running file when a newer version is available. Network
+or user-decision failures do not prevent the current run from continuing.
+Scheduled runs remain non-interactive and skip the check. Manual runs also
+atomically refresh the installed copy only when the running version is newer.
+Equal versions are a no-op, while an older copy is prevented from overwriting a
+newer installation.
 
 ## Security and recovery
 

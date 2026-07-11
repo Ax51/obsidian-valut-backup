@@ -91,11 +91,16 @@ because launchd reads `settings.sh` at runtime—even if that settings update us
 `--no-schedule`. The flag prevents plist changes; it does not pause an already
 loaded job.
 
-Action-oriented manual runs compare their semantic version with the copy in
-`~/.config/obsidian-vault-backup`. A newer version refreshes the installed copy
+Action-oriented manual runs first download the script from the project's GitHub
+`main` branch and compare its `SCRIPT_VERSION` with the running version. When a
+newer version is available, the script asks for confirmation. Accepting the
+offer replaces the running file atomically and restarts it; declining it, or a
+failed download, continues the current run. Scheduled runs never perform this
+check and never prompt. The running version is then compared with the copy in
+`~/.config/obsidian-vault-backup`: a newer version refreshes the installed copy
 atomically, an equal version is a no-op, and an older version stops instead of
 overwriting a newer installation. Read-only `--help`, `--version`, and
-`--inspect` calls exit before the installed-copy update.
+`--inspect` calls exit before the network check and installed-copy update.
 
 ## Optional shell command
 
