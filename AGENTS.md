@@ -47,6 +47,8 @@ include tests for missing, equal, newer, and older installed versions.
 - Never commit credentials, repository passwords, MEGA passwords, generated
   settings, Kopia repository metadata, or launchd files from a user's machine.
 - Keep persistent project state under `~/.config/obsidian-vault-backup`.
+- Derive user-scoped launchd and Keychain identifiers from `id -un`; never
+  hard-code a developer's macOS username.
 - Keep the Kopia repository password in macOS Keychain.
 - Treat the selected vault as read-only. Restores must target a separate
   directory during validation.

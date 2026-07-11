@@ -103,7 +103,7 @@ schedule.
 └── backup.log                launchd output
 
 ~/Library/LaunchAgents/
-└── com.example.obsidian-vault-backup.plist
+└── com.<system-user>.obsidian-vault-backup.plist
 ```
 
 The Kopia repository password is stored separately in macOS Keychain.

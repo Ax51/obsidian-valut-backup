@@ -5,14 +5,15 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="0.1.1"
+readonly SCRIPT_VERSION="0.1.2"
+readonly SYSTEM_USER="$(id -un)"
 readonly APP_DIR="$HOME/.config/$APP_NAME"
 readonly SETTINGS_FILE="$APP_DIR/settings.sh"
 readonly KOPIA_CONFIG_FILE="$APP_DIR/repository.config"
 readonly LOG_FILE="$APP_DIR/backup.log"
 readonly LOCK_DIR="$APP_DIR/backup.lock"
 readonly INSTALLED_SCRIPT="$APP_DIR/$APP_NAME.sh"
-readonly LAUNCHD_LABEL="com.example.obsidian-vault-backup"
+readonly LAUNCHD_LABEL="com.$SYSTEM_USER.obsidian-vault-backup"
 readonly LAUNCHD_PLIST="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
 readonly KEYCHAIN_SERVICE="$LAUNCHD_LABEL.kopia"
 readonly KEYCHAIN_ACCOUNT="repository-password"
