@@ -5,12 +5,14 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="0.1.2"
+readonly SCRIPT_VERSION="0.3.2"
+readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly SYSTEM_USER="$(id -un)"
 readonly APP_DIR="$HOME/.config/$APP_NAME"
 readonly SETTINGS_FILE="$APP_DIR/settings.sh"
 readonly KOPIA_CONFIG_FILE="$APP_DIR/repository.config"
 readonly LOG_FILE="$APP_DIR/backup.log"
+readonly STATE_FILE="$APP_DIR/state.sh"
 readonly LOCK_DIR="$APP_DIR/backup.lock"
 readonly INSTALLED_SCRIPT="$APP_DIR/$APP_NAME.sh"
 readonly LAUNCHD_LABEL="com.$SYSTEM_USER.obsidian-vault-backup"
@@ -19,24 +21,30 @@ readonly KEYCHAIN_SERVICE="$LAUNCHD_LABEL.kopia"
 readonly KEYCHAIN_ACCOUNT="repository-password"
 readonly DEFAULT_REMOTE_NAME="mega"
 readonly DEFAULT_REMOTE_PATH="ObsidianVaultBackup"
-readonly DEFAULT_INTERVAL_SECONDS=86400
+readonly DEFAULT_SCHEDULE_TIME="03:00"
+readonly DEFAULT_SOAK_MINUTES=10
+readonly SOURCE_QUIET_SECONDS=60
+readonly SOURCE_QUIET_MAX_ATTEMPTS=5
+readonly REMOTE_RETRY_SECONDS=30
+readonly REMOTE_MAX_ATTEMPTS=10
 
 SOURCE_PATH=""
 REMOTE_NAME="$DEFAULT_REMOTE_NAME"
 REMOTE_PATH="$DEFAULT_REMOTE_PATH"
 MEGA_EMAIL=""
-BACKUP_INTERVAL_SECONDS="$DEFAULT_INTERVAL_SECONDS"
+SCHEDULE_TIME="$DEFAULT_SCHEDULE_TIME"
+SOAK_MINUTES="$DEFAULT_SOAK_MINUTES"
 KOPIA_BIN=""
 RCLONE_BIN=""
 DISCLAIMER_ACCEPTED=false
 DISCLAIMER_ACCEPTED_AT=""
 
 CLI_SOURCE_PATH=""
-CLI_INTERVAL_SECONDS=""
 IMMEDIATE_BACKUP=true
 UPDATE_SETTINGS=false
 INSTALL_SCHEDULE=true
 VERIFY_AFTER_BACKUP=false
+INSPECT_STATUS=false
 SCHEDULED_RUN=false
 FIRST_CONFIGURATION=false
 REPOSITORY_CONNECTION_CHANGED=false
@@ -137,7 +145,7 @@ the author and contributors are not responsible for data loss, service costs,
 account issues, security incidents, or any other damage resulting from its use.
 
 Documentation:
-https://github.com/Ax51/obsidian-valut-backup
+$PROJECT_URL
 
 EOF
 
@@ -192,14 +200,55 @@ expand_home() {
   esac
 }
 
+decode_path_input() {
+  local value="$1"
+  local decoded=""
+  local character=""
+  local index=0
+  local length=0
+
+  case "$value" in
+    \"*\") value="${value#\"}"; value="${value%\"}" ;;
+    \'*\') value="${value#\'}"; value="${value%\'}" ;;
+  esac
+
+  length=${#value}
+  while (( index < length )); do
+    character="${value:index:1}"
+    if [[ "$character" == '\' && $((index + 1)) -lt length ]]; then
+      index=$((index + 1))
+      character="${value:index:1}"
+    fi
+    decoded="${decoded}${character}"
+    index=$((index + 1))
+  done
+
+  printf '%s' "$decoded"
+}
+
+normalize_existing_directory() {
+  local input_path="$1"
+  local expanded_path=""
+
+  input_path="$(decode_path_input "$input_path")"
+  expanded_path="$(expand_home "$input_path")"
+  [[ -d "$expanded_path" ]] || return 1
+  (cd "$expanded_path" 2>/dev/null && pwd -P)
+}
+
 validate_remote_name() {
   [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]] || die \
     "Remote name may contain only letters, numbers, underscores, and hyphens."
 }
 
-validate_interval() {
-  [[ "$1" =~ ^[0-9]+$ ]] || die "Backup interval must be a number of seconds."
-  (( "$1" >= 3600 )) || die "Backup interval must be at least 3600 seconds."
+validate_schedule_time() {
+  [[ "$1" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die \
+    "Schedule time must use 24-hour HH:MM format."
+}
+
+validate_soak_minutes() {
+  [[ "$1" =~ ^[0-9]+$ ]] || die "Soak time must be a number of minutes."
+  (( "$1" <= 60 )) || die "Soak time cannot exceed 60 minutes."
 }
 
 usage() {
@@ -211,11 +260,11 @@ Usage:
 
 Options:
   --source PATH          Use PATH as the source for this run only.
-  --interval SECONDS     Override the launchd interval for this run only.
   --no-immediate-backup  Configure everything without starting a backup now.
-  --no-schedule          Do not install or inspect the launchd schedule.
+  --no-schedule          Do not install or update the launchd schedule.
   --update-settings      Interactively update saved settings and credentials.
   --verify               Verify 100% of snapshot files after the backup.
+  --inspect              Show configuration and schedule status without changes.
   --version              Show the script version.
   -h, --help             Show this help.
 
@@ -227,7 +276,9 @@ Examples:
   ./obsidian-vault-backup.sh --no-immediate-backup
   ./obsidian-vault-backup.sh --source /tmp/TestVault --no-schedule
   ./obsidian-vault-backup.sh --update-settings
+  ./obsidian-vault-backup.sh --inspect
 EOF
+  printf '\nFull documentation:\n  %s\n' "$PROJECT_URL"
 }
 
 
@@ -239,11 +290,6 @@ parse_arguments() {
       --source)
         (($# >= 2)) || die "--source requires a path."
         CLI_SOURCE_PATH="$2"
-        shift 2
-        ;;
-      --interval)
-        (($# >= 2)) || die "--interval requires a number of seconds."
-        CLI_INTERVAL_SECONDS="$2"
         shift 2
         ;;
       --no-immediate-backup)
@@ -260,6 +306,10 @@ parse_arguments() {
         ;;
       --verify)
         VERIFY_AFTER_BACKUP=true
+        shift
+        ;;
+      --inspect)
+        INSPECT_STATUS=true
         shift
         ;;
       --scheduled-run)
@@ -433,7 +483,8 @@ save_settings() {
     printf 'REMOTE_NAME=%q\n' "$REMOTE_NAME"
     printf 'REMOTE_PATH=%q\n' "$REMOTE_PATH"
     printf 'MEGA_EMAIL=%q\n' "$MEGA_EMAIL"
-    printf 'BACKUP_INTERVAL_SECONDS=%q\n' "$BACKUP_INTERVAL_SECONDS"
+    printf 'SCHEDULE_TIME=%q\n' "$SCHEDULE_TIME"
+    printf 'SOAK_MINUTES=%q\n' "$SOAK_MINUTES"
     printf 'DISCLAIMER_ACCEPTED=%q\n' "$DISCLAIMER_ACCEPTED"
     printf 'DISCLAIMER_ACCEPTED_AT=%q\n' "$DISCLAIMER_ACCEPTED_AT"
   } > "$temporary_file"
@@ -473,7 +524,8 @@ configure_rclone_remote() {
 configure_settings_interactively() {
   local old_remote_spec="${REMOTE_NAME}:${REMOTE_PATH}"
   local source_input=""
-  local interval_input=""
+  local schedule_input=""
+  local soak_input=""
   local mega_password=""
   local remote_already_exists=false
 
@@ -484,9 +536,11 @@ configure_settings_interactively() {
 
   while :; do
     source_input="$(prompt_value "Folder to back up" "$SOURCE_PATH")"
-    SOURCE_PATH="$(expand_home "$source_input")"
-    [[ -d "$SOURCE_PATH" ]] && break
-    warn "Folder does not exist: $SOURCE_PATH"
+    if SOURCE_PATH="$(normalize_existing_directory "$source_input")"; then
+      printf 'Resolved source path: %s\n' "$SOURCE_PATH"
+      break
+    fi
+    warn "Folder does not exist or cannot be resolved: $source_input"
   done
 
   REMOTE_NAME="$(prompt_value "rclone remote name" "$REMOTE_NAME")"
@@ -508,9 +562,13 @@ configure_settings_interactively() {
     [[ -n "$mega_password" ]] || die "MEGA password cannot be empty."
   fi
 
-  interval_input="$(prompt_value "Backup interval in seconds" "$BACKUP_INTERVAL_SECONDS")"
-  validate_interval "$interval_input"
-  BACKUP_INTERVAL_SECONDS="$interval_input"
+  schedule_input="$(prompt_value "Daily backup time (HH:MM)" "$SCHEDULE_TIME")"
+  validate_schedule_time "$schedule_input"
+  SCHEDULE_TIME="$schedule_input"
+
+  soak_input="$(prompt_value "Scheduled wake-up soak in minutes" "$SOAK_MINUTES")"
+  validate_soak_minutes "$soak_input"
+  SOAK_MINUTES="$soak_input"
 
   configure_rclone_remote "$mega_password"
   unset mega_password
@@ -531,20 +589,20 @@ configure_settings_interactively() {
 
 apply_cli_overrides() {
   if [[ -n "$CLI_SOURCE_PATH" ]]; then
-    SOURCE_PATH="$(expand_home "$CLI_SOURCE_PATH")"
-  fi
-  if [[ -n "$CLI_INTERVAL_SECONDS" ]]; then
-    validate_interval "$CLI_INTERVAL_SECONDS"
-    BACKUP_INTERVAL_SECONDS="$CLI_INTERVAL_SECONDS"
+    SOURCE_PATH="$(normalize_existing_directory "$CLI_SOURCE_PATH")" || \
+      die "Source folder does not exist or cannot be resolved: $CLI_SOURCE_PATH"
   fi
 }
 
 validate_effective_settings() {
   [[ -n "$SOURCE_PATH" ]] || die "Source path is empty. Run with --update-settings."
+  [[ "$SOURCE_PATH" == /* ]] || die \
+    "Saved source path must be absolute. Run the script manually to update settings."
   [[ -d "$SOURCE_PATH" ]] || die "Source folder does not exist: $SOURCE_PATH"
   validate_remote_name "$REMOTE_NAME"
   [[ -n "$REMOTE_PATH" ]] || die "Remote path is empty."
-  validate_interval "$BACKUP_INTERVAL_SECONDS"
+  validate_schedule_time "$SCHEDULE_TIME"
+  validate_soak_minutes "$SOAK_MINUTES"
   "$RCLONE_BIN" listremotes 2>/dev/null | grep -Fxq "${REMOTE_NAME}:" || \
     die "rclone remote '${REMOTE_NAME}' is missing. Run with --update-settings."
 }
@@ -661,13 +719,101 @@ acquire_backup_lock() {
   trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 }
 
+source_fingerprint() {
+  find "$SOURCE_PATH" -type f -exec stat -f '%N|%z|%m' {} + 2>/dev/null | \
+    LC_ALL=C sort | shasum -a 256 | awk '{ print $1 }'
+}
+
+wait_for_source_after_wake() {
+  local before=""
+  local after=""
+  local attempt=1
+  local soak_seconds=$((SOAK_MINUTES * 60))
+
+  before="$(source_fingerprint)"
+  if (( soak_seconds > 0 )); then
+    info "Scheduled wake-up soak: waiting $SOAK_MINUTES minute(s)"
+    sleep "$soak_seconds"
+  else
+    info "Scheduled wake-up soak disabled; checking a $SOURCE_QUIET_SECONDS-second quiet window"
+    sleep "$SOURCE_QUIET_SECONDS"
+  fi
+  after="$(source_fingerprint)"
+
+  [[ "$before" == "$after" ]] && {
+    success "Source tree remained stable during the soak"
+    return 0
+  }
+
+  warn "Source tree changed during the soak; waiting for a quiet window."
+  before="$after"
+  while (( attempt <= SOURCE_QUIET_MAX_ATTEMPTS )); do
+    sleep "$SOURCE_QUIET_SECONDS"
+    after="$(source_fingerprint)"
+    if [[ "$before" == "$after" ]]; then
+      success "Source tree is stable after $SOURCE_QUIET_SECONDS seconds"
+      return 0
+    fi
+    warn "Source is still changing (quiet check $attempt/$SOURCE_QUIET_MAX_ATTEMPTS)."
+    before="$after"
+    attempt=$((attempt + 1))
+  done
+
+  die "Source did not become stable; scheduled backup was aborted to avoid a mixed snapshot."
+}
+
+wait_for_remote_after_wake() {
+  local attempt=1
+
+  while (( attempt <= REMOTE_MAX_ATTEMPTS )); do
+    if "$RCLONE_BIN" lsd "${REMOTE_NAME}:" --max-depth 1 >/dev/null 2>&1; then
+      success "MEGA remote is reachable"
+      return 0
+    fi
+    warn "MEGA remote is not reachable (attempt $attempt/$REMOTE_MAX_ATTEMPTS)."
+    (( attempt < REMOTE_MAX_ATTEMPTS )) && sleep "$REMOTE_RETRY_SECONDS"
+    attempt=$((attempt + 1))
+  done
+
+  die "MEGA remote did not become reachable; scheduled backup was not started."
+}
+
+record_backup_success() {
+  local temporary_file="$STATE_FILE.tmp"
+  local run_mode="manual"
+  [[ "$SCHEDULED_RUN" == true ]] && run_mode="scheduled"
+
+  umask 077
+  {
+    printf '# Generated by %s.\n' "$APP_NAME"
+    printf 'LAST_BACKUP_SUCCESS_EPOCH=%q\n' "$(date '+%s')"
+    printf 'LAST_BACKUP_SUCCESS_AT=%q\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'LAST_BACKUP_SOURCE=%q\n' "$SOURCE_PATH"
+    printf 'LAST_BACKUP_MODE=%q\n' "$run_mode"
+  } > "$temporary_file"
+  mv "$temporary_file" "$STATE_FILE"
+  chmod 600 "$STATE_FILE"
+}
+
 run_backup() {
+  local fingerprint_before=""
+  local fingerprint_after=""
+
   acquire_backup_lock
   info "Starting encrypted backup"
   printf 'Source: %s\n' "$SOURCE_PATH"
   printf 'Destination: %s\n' "$(repository_remote_spec)"
 
+  fingerprint_before="$(source_fingerprint)"
   kopia_run snapshot create "$SOURCE_PATH"
+  fingerprint_after="$(source_fingerprint)"
+
+  if [[ "$fingerprint_before" != "$fingerprint_after" ]]; then
+    warn "Source changed while Kopia was reading it; creating one follow-up snapshot."
+    kopia_run snapshot create "$SOURCE_PATH"
+  fi
+
+  record_backup_success
   success "Backup completed at $(date '+%Y-%m-%d %H:%M:%S')"
 
   if [[ "$VERIFY_AFTER_BACKUP" == true ]]; then
@@ -691,6 +837,12 @@ xml_escape() {
 write_launchd_plist() {
   local script_xml=""
   local log_xml=""
+  local schedule_hour="${SCHEDULE_TIME%:*}"
+  local schedule_minute="${SCHEDULE_TIME#*:}"
+  schedule_hour="${schedule_hour#0}"
+  schedule_minute="${schedule_minute#0}"
+  [[ -n "$schedule_hour" ]] || schedule_hour=0
+  [[ -n "$schedule_minute" ]] || schedule_minute=0
   script_xml="$(xml_escape "$INSTALLED_SCRIPT")"
   log_xml="$(xml_escape "$LOG_FILE")"
 
@@ -703,7 +855,11 @@ write_launchd_plist() {
     printf '%s\n' '<dict>'
     printf '  <key>Label</key><string>%s</string>\n' "$LAUNCHD_LABEL"
     printf '  <key>ProgramArguments</key><array><string>%s</string><string>--scheduled-run</string></array>\n' "$script_xml"
-    printf '  <key>StartInterval</key><integer>%s</integer>\n' "$BACKUP_INTERVAL_SECONDS"
+    printf '%s\n' '  <key>StartCalendarInterval</key>'
+    printf '%s\n' '  <dict>'
+    printf '    <key>Hour</key><integer>%s</integer>\n' "$schedule_hour"
+    printf '    <key>Minute</key><integer>%s</integer>\n' "$schedule_minute"
+    printf '%s\n' '  </dict>'
     printf '  <key>StandardOutPath</key><string>%s</string>\n' "$log_xml"
     printf '  <key>StandardErrorPath</key><string>%s</string>\n' "$log_xml"
     printf '%s\n' '</dict>'
@@ -714,12 +870,22 @@ write_launchd_plist() {
 }
 
 schedule_matches() {
-  local installed_interval=""
+  local installed_hour=""
+  local installed_minute=""
   local installed_script=""
+  local expected_hour="${SCHEDULE_TIME%:*}"
+  local expected_minute="${SCHEDULE_TIME#*:}"
+  expected_hour="${expected_hour#0}"
+  expected_minute="${expected_minute#0}"
+  [[ -n "$expected_hour" ]] || expected_hour=0
+  [[ -n "$expected_minute" ]] || expected_minute=0
   [[ -f "$LAUNCHD_PLIST" ]] || return 1
-  installed_interval="$(plutil -extract StartInterval raw "$LAUNCHD_PLIST" 2>/dev/null || true)"
+  installed_hour="$(plutil -extract StartCalendarInterval.Hour raw "$LAUNCHD_PLIST" 2>/dev/null || true)"
+  installed_minute="$(plutil -extract StartCalendarInterval.Minute raw "$LAUNCHD_PLIST" 2>/dev/null || true)"
   installed_script="$(plutil -extract ProgramArguments.0 raw "$LAUNCHD_PLIST" 2>/dev/null || true)"
-  [[ "$installed_interval" == "$BACKUP_INTERVAL_SECONDS" && "$installed_script" == "$INSTALLED_SCRIPT" ]]
+  [[ "$installed_hour" == "$expected_hour" && \
+     "$installed_minute" == "$expected_minute" && \
+     "$installed_script" == "$INSTALLED_SCRIPT" ]]
 }
 
 ensure_schedule() {
@@ -734,7 +900,118 @@ ensure_schedule() {
   write_launchd_plist
   launchctl bootout "$service" >/dev/null 2>&1 || true
   launchctl bootstrap "$domain" "$LAUNCHD_PLIST"
-  success "Backup schedule installed: every $BACKUP_INTERVAL_SECONDS seconds"
+  success "Wake-aware daily schedule installed for $SCHEDULE_TIME local time"
+}
+
+next_calendar_run() {
+  local schedule_time="${1:-$SCHEDULE_TIME}"
+  local now_epoch=""
+  local target_epoch=""
+  now_epoch="$(date '+%s')"
+  target_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S' \
+    "$(date '+%Y-%m-%d') $schedule_time:00" '+%s' 2>/dev/null)" || return 1
+  if (( target_epoch <= now_epoch )); then
+    target_epoch="$(date -r "$target_epoch" -v+1d '+%s')"
+  fi
+  date -r "$target_epoch" '+%Y-%m-%d %H:%M:%S %Z'
+}
+
+inspect_status() {
+  local installed_version="not installed"
+  local launch_output=""
+  local launch_state="unknown"
+  local launch_runs="unknown"
+  local last_exit_code="unknown"
+  local plist_hour=""
+  local plist_minute=""
+  local plist_time=""
+  local service="gui/$(id -u)/$LAUNCHD_LABEL"
+
+  info "Obsidian Vault Backup status"
+  printf 'Running script version: %s\n' "$SCRIPT_VERSION"
+  printf 'Application directory: %s\n' "$APP_DIR"
+
+  if [[ -f "$INSTALLED_SCRIPT" ]]; then
+    installed_version="$(extract_script_version "$INSTALLED_SCRIPT")"
+    [[ -n "$installed_version" ]] || installed_version="unknown"
+  fi
+  printf 'Installed script version: %s\n' "$installed_version"
+
+  if load_settings; then
+    printf '\nConfiguration:\n'
+    printf '  Settings file: present\n'
+    printf '  Source: %s\n' "${SOURCE_PATH:-not configured}"
+    if [[ -n "${SOURCE_PATH:-}" ]]; then
+      if [[ "$SOURCE_PATH" != /* ]]; then
+        printf '  Source status: INVALID — relative path must be updated\n'
+      elif [[ -d "$SOURCE_PATH" ]]; then
+        printf '  Source status: available\n'
+      else
+        printf '  Source status: unavailable\n'
+      fi
+    fi
+    printf '  Repository remote: %s:%s\n' "${REMOTE_NAME:-?}" "${REMOTE_PATH:-?}"
+    printf '  Daily schedule time: %s local time\n' "${SCHEDULE_TIME:-?}"
+    printf '  Scheduled soak: %s minute(s)\n' "${SOAK_MINUTES:-?}"
+  else
+    printf '\nConfiguration: missing (%s)\n' "$SETTINGS_FILE"
+  fi
+
+  if [[ -f "$KOPIA_CONFIG_FILE" ]]; then
+    printf '  Kopia connection: present\n'
+  else
+    printf '  Kopia connection: missing\n'
+  fi
+
+  printf '\nLast successful backup:\n'
+  if [[ -f "$STATE_FILE" ]]; then
+    LAST_BACKUP_SUCCESS_EPOCH=""
+    LAST_BACKUP_SUCCESS_AT=""
+    LAST_BACKUP_SOURCE=""
+    LAST_BACKUP_MODE=""
+    # shellcheck disable=SC1090
+    source "$STATE_FILE"
+    printf '  Time: %s\n' "${LAST_BACKUP_SUCCESS_AT:-unknown}"
+    printf '  Mode: %s\n' "${LAST_BACKUP_MODE:-unknown}"
+    printf '  Source: %s\n' "${LAST_BACKUP_SOURCE:-unknown}"
+  else
+    printf '  No state recorded yet. It will appear after the next successful backup.\n'
+  fi
+
+  printf '\nlaunchd schedule:\n'
+  if [[ ! -f "$LAUNCHD_PLIST" ]]; then
+    printf '  Plist: not installed\n'
+    printf '  Service: not loaded\n'
+    printf '  Next run: none\n'
+  else
+    plist_hour="$(plutil -extract StartCalendarInterval.Hour raw "$LAUNCHD_PLIST" 2>/dev/null || true)"
+    plist_minute="$(plutil -extract StartCalendarInterval.Minute raw "$LAUNCHD_PLIST" 2>/dev/null || true)"
+    printf '  Plist: %s\n' "$LAUNCHD_PLIST"
+    if [[ -n "$plist_hour" && -n "$plist_minute" ]]; then
+      printf -v plist_time '%02d:%02d' "$plist_hour" "$plist_minute"
+      printf '  Calendar trigger: daily at %02d:%02d local time\n' "$plist_hour" "$plist_minute"
+    else
+      printf '  Calendar trigger: missing or legacy interval plist\n'
+    fi
+
+    if launch_output="$(launchctl print "$service" 2>/dev/null)"; then
+      launch_state="$(printf '%s\n' "$launch_output" | awk -F'= ' '/^[[:space:]]*state =/ { print $2; exit }')"
+      launch_runs="$(printf '%s\n' "$launch_output" | awk -F'= ' '/^[[:space:]]*runs =/ { print $2; exit }')"
+      last_exit_code="$(printf '%s\n' "$launch_output" | awk -F'= ' '/^[[:space:]]*last exit code =/ { print $2; exit }')"
+      printf '  Service: loaded\n'
+      printf '  Current state: %s\n' "${launch_state:-unknown}"
+      printf '  Runs: %s\n' "${launch_runs:-unknown}"
+      printf '  Last exit code: %s\n' "${last_exit_code:-not reported}"
+      printf '  Next calendar event: %s\n' "$(next_calendar_run "${plist_time:-$SCHEDULE_TIME}" || printf 'unknown')"
+      printf '  Sleep behavior: a missed calendar event runs after the Mac wakes\n'
+      printf '  Power-off behavior: a missed event waits for the next calendar day\n'
+    else
+      printf '  Service: plist exists but the job is not loaded\n'
+      printf '  Next run: none until the job is loaded\n'
+    fi
+  fi
+
+  printf '\nLogs: %s\n' "$LOG_FILE"
 }
 
 
@@ -743,10 +1020,25 @@ ensure_schedule() {
 main() {
   parse_arguments "$@"
 
+  if [[ "$INSPECT_STATUS" == true ]]; then
+    inspect_status
+    exit 0
+  fi
+
   if ! load_settings && [[ "$SCHEDULED_RUN" == true ]]; then
     die "Settings are missing: $SETTINGS_FILE"
   fi
   ensure_disclaimer_acceptance
+
+  if [[ -n "${SOURCE_PATH:-}" && "$SOURCE_PATH" != /* ]]; then
+    if [[ "$SCHEDULED_RUN" == true ]]; then
+      die "Saved source path is relative: $SOURCE_PATH. Run the script manually to update settings."
+    fi
+    warn "Saved source path is relative and ambiguous: $SOURCE_PATH"
+    warn "Please enter it again; it will be stored as an absolute path."
+    SOURCE_PATH=""
+    UPDATE_SETTINGS=true
+  fi
 
   mkdir -p "$APP_DIR"
   chmod 700 "$APP_DIR"
@@ -758,6 +1050,8 @@ main() {
     [[ -x "$KOPIA_BIN" && -x "$RCLONE_BIN" ]] || die \
       "kopia or rclone is missing. Run the script manually."
     validate_effective_settings
+    wait_for_remote_after_wake
+    wait_for_source_after_wake
     ensure_repository_connection
     run_backup
     exit 0
@@ -797,4 +1091,6 @@ main() {
   printf 'KopiaUI remote path: %s\n' "$(repository_remote_spec)"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

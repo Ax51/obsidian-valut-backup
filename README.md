@@ -6,6 +6,11 @@ Obsidian vault in MEGA.
 The vault can continue living in iCloud: this project adds an independent
 offsite backup layer and does not replace the existing sync workflow.
 
+> [!IMPORTANT]
+> If the vault is stored in iCloud Drive, enable **Keep Downloaded** for the
+> vault (or its enclosing Obsidian folder) in Finder before relying on scheduled
+> backups. See [Using an iCloud vault](docs/usage.md#using-an-icloud-vault).
+
 ## How it works
 
 ```text
@@ -67,15 +72,22 @@ Settings and the permanent script are stored under:
 ~/.config/obsidian-vault-backup
 ```
 
+Source paths are normalized before they are saved. A relative input such as
+`./docs` is resolved against the directory from which the script was launched
+and stored as an absolute path, so later manual and scheduled runs cannot point
+at a different directory accidentally. Finder/Terminal-style escaped paths such
+as `/Users/me/Library/Mobile\ Documents/...` can be pasted into the interactive
+prompt directly.
+
 ## Command-line options
 
 ```text
 --source PATH          Use a different source for this run only.
---interval SECONDS     Override the schedule interval without saving it.
 --no-immediate-backup  Configure the flow without starting a backup now.
---no-schedule          Do not install or inspect the launchd schedule.
+--no-schedule          Do not install or update the launchd schedule.
 --update-settings      Update saved settings and credentials interactively.
 --verify               Verify 100% of snapshot files after the backup.
+--inspect              Show configuration and schedule status without changes.
 --version              Show the script version.
 -h, --help             Show built-in help.
 ```
@@ -86,16 +98,34 @@ For example, configure everything without performing the first backup:
 ./obsidian-vault-backup.sh --no-immediate-backup
 ```
 
+`--no-schedule` only skips schedule installation or updates; it does not unload
+an existing launchd job. `--source` applies only to the current process and is
+never saved. For exact side effects and safe combinations, see
+[Options and common flag combinations](docs/usage.md#options).
+
 Update settings later using the installed copy:
 
 ```bash
 ~/.config/obsidian-vault-backup/obsidian-vault-backup.sh --update-settings
 ```
 
-Every manual run from a downloaded file compares its version with the installed
-copy. A newer version atomically refreshes the installed script, an equal
-version leaves it untouched, and an older script cannot overwrite a newer
-installed version.
+Inspect the saved source, last successful backup, and launchd state without
+changing anything:
+
+```bash
+~/.config/obsidian-vault-backup/obsidian-vault-backup.sh --inspect
+```
+
+Scheduled backups use a daily wake-aware calendar event, defaulting to 03:00
+local time. If the Mac is asleep, launchd starts the job after wake. The script
+then waits for MEGA connectivity, applies the configured soak period (10 minutes
+by default), and checks that the source tree has settled before starting Kopia.
+
+Every action-oriented manual run from a downloaded file compares its version
+with the installed copy. A newer version atomically refreshes the installed
+script, an equal version leaves it untouched, and an older script cannot
+overwrite a newer installed version. `--help`, `--version`, and `--inspect` exit
+without changing the installed copy.
 
 ## Test before using the real vault
 

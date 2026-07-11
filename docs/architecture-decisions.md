@@ -27,7 +27,7 @@ rclone remote (MEGA transport)
         v
 MEGA repository
 
-launchd runs the installed standalone script on its configured interval.
+launchd runs the installed standalone script on its daily calendar schedule.
 KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 ```
 
@@ -38,19 +38,27 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 | Backup engine | Kopia | GUI makes history browsing, mounting, and complete restores more approachable; CLI remains suitable for automation. |
 | Remote transport | rclone | Required for MEGA, which is not a native Kopia repository backend. Kopia starts and manages rclone once the remote is configured. |
 | Remote storage | MEGA free tier | The vault is approximately 40–45 MB, so the available quota is sufficient with the selected retention policy. |
-| Scheduler | macOS `launchd` | Native scheduler; one user agent invokes the installed standalone script at the configured interval. |
+| Scheduler | macOS `launchd` | A daily `StartCalendarInterval` event provides wake-after-sleep catch-up. A configurable soak and preflight run before Kopia. |
 | Secret storage | macOS Keychain and a restricted rclone config | The Kopia password lives in Keychain. rclone stores the MEGA password in its obscured format in a file readable only by the current macOS user. Recovery copies live in Apple Passwords. |
 | Human recovery interface | KopiaUI | It can browse history, mount a snapshot, restore individual items, or restore the entire vault into another directory. |
 
 ## Backup policy
 
-- Run once each day, with missed-run recovery rather than a strict wall-clock requirement.
+- Request one run each day at the configured local time. A firing missed during
+  sleep runs after wake; a firing missed while powered off waits until the next
+  calendar day.
+- Apply MEGA connectivity retries, then a scheduled-only soak (10 minutes by
+  default) and source quiet-window check before starting Kopia.
 - Include the whole vault, including `.obsidian/`.
 - Keep 14 daily, 8 weekly, and 12 monthly snapshots.
 - Use Kopia's encrypted repository defaults; do not add a second encryption layer.
-- Keep the vault path in user configuration, never hard-code a personal iCloud path.
+- Keep the vault path in user configuration, never hard-code a personal iCloud
+  path, and persist it only as a normalized absolute directory path.
+- Treat each normalized source path as a separate Kopia snapshot history. A
+  switch from a fixture to the real vault does not merge or rewrite old
+  snapshots.
 
-Kopia's own policy supports retention and a snapshot interval, but `launchd` is
+Kopia's own policy supports retention and snapshot scheduling, but `launchd` is
 the source of truth for this project. This keeps scheduling, Keychain access,
 logging, and retry behaviour in one macOS-native entry point. The Kopia policy
 does not configure an automatic snapshot interval, avoiding duplicate runs.

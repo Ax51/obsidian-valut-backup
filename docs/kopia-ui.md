@@ -89,6 +89,35 @@ backup flow.
 Do not add an automatic snapshot interval in KopiaUI. `launchd` owns scheduling
 for this project, while the global Kopia policy owns retention.
 
+### Understanding retention labels
+
+Labels such as `daily-1`, `weekly-1`, and `monthly-1` describe why a particular
+snapshot is currently retained. They do not mean the policy keeps only one
+daily, weekly, or monthly snapshot. A new snapshot can occupy the first slot in
+several retention groups simultaneously.
+
+To inspect the effective global policy directly:
+
+```bash
+KOPIA_PASSWORD="$(security find-generic-password \
+  -s "com.$(id -un).obsidian-vault-backup.kopia" \
+  -a repository-password -w)" \
+  kopia --config-file="$HOME/.config/obsidian-vault-backup/repository.config" \
+  policy get --global
+```
+
+The expected retention values are:
+
+```text
+Annual snapshots:               0
+Monthly snapshots:             12
+Weekly snapshots:               8
+Daily snapshots:               14
+Hourly snapshots:               0
+Latest snapshots:               0
+Ignore identical snapshots:  true
+```
+
 ## Restore the whole vault
 
 1. In **Snapshots**, open the snapshot you want to test.
@@ -169,4 +198,3 @@ Then reconnect KopiaUI using the same remote path and repository password.
 - [Kopia repository and rclone documentation](https://kopia.io/docs/repositories/)
 - [KopiaUI getting started and restore documentation](https://kopia.io/docs/getting-started/)
 - [Kopia installation documentation](https://kopia.io/docs/installation/)
-
