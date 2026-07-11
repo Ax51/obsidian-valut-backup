@@ -204,6 +204,48 @@ For acceptance testing and full disaster recovery, continue restoring to a new
 directory through KopiaUI first. In-place `--restore` is intended for deliberate
 recovery after that workflow has already been validated.
 
+### Restore performance and responsibility split
+
+Missing-only CLI restore deliberately downloads the complete latest snapshot to
+staging before merging absent entries. Restoring two deleted notes therefore
+takes approximately as long as downloading the whole vault. For a roughly
+45 MB vault at an effective 150 KB/s, about five minutes of transfer plus Kopia
+metadata and local merge time is expected.
+
+This is an accepted safety/performance tradeoff. The CLI does not implement a
+per-path restore option or attempt to reverse-engineer missing paths from Kopia
+metadata. Use KopiaUI to browse history and restore a known file or directory;
+use `obsidian-backup --restore` for the simple whole-latest-snapshot recovery
+workflow.
+
+## Failed and interrupted runs
+
+The script records a successful backup only after `kopia snapshot create`
+returns successfully. A network failure during upload makes the command fail
+and leaves earlier snapshots available. Kopia may retain an incomplete
+checkpoint or uploaded content that is not reachable from a completed snapshot;
+automatic full maintenance later garbage-collects unreachable content. Cleanup
+is intentionally delayed by Kopia's safety windows and may take multiple
+maintenance cycles.
+
+Kopia's daily maintenance checks snapshot structure and required blobs, but a
+full payload check requires `--verify`, which downloads, decrypts, and
+decompresses snapshot data. A successful snapshot followed by a failed
+verification is still a successful backup attempt but not a successful
+integrity check. Inspect the command exit status and logs separately from the
+last-backup timestamp.
+
+Closing a MacBook lid during an active backup or restore normally suspends the
+process. After wake it may continue, or it may fail if the MEGA connection has
+expired. The script does not automatically retry a failed in-progress Kopia
+operation; run it manually or wait for the next daily launchd event. This is
+different from a calendar event missed while already asleep, which launchd
+delivers after the next wake.
+
+Further details: [Kopia maintenance](https://kopia.io/docs/advanced/maintenance/),
+[Kopia consistency verification](https://kopia.io/docs/advanced/consistency/),
+and [Apple launchd sleep behavior](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html).
+
 ## Inspect configuration and schedule
 
 Use the installed script to inspect state without connecting to MEGA or making

@@ -26,8 +26,7 @@ rclone transport
 MEGA repository
 ```
 
-- **Kopia** provides encryption, compression, deduplication, snapshots, and
-  retention.
+- **Kopia** provides encryption, deduplication, snapshots, and retention.
 - **rclone** connects Kopia to MEGA.
 - **launchd** runs the backup automatically on macOS.
 - **KopiaUI** provides visual history browsing, mounting, and restores.
@@ -125,6 +124,9 @@ Every restore is manual and disables backup and schedule changes for that run.
 The script first asks whether existing files may be overwritten; the default
 restores the snapshot to protected staging and copies only missing files into
 the source. It then requires a separate confirmation before writing anything.
+Because missing-only mode stages the complete latest snapshot, its duration is
+proportional to the whole vault rather than the number of deleted files. Use
+KopiaUI when only a known file or directory needs to be restored.
 
 Update settings later using the installed copy:
 
@@ -143,6 +145,9 @@ Scheduled backups use a daily wake-aware calendar event, defaulting to 03:00
 local time. If the Mac is asleep, launchd starts the job after wake. The script
 then waits for MEGA connectivity, applies the configured soak period (10 minutes
 by default), and checks that the source tree has settled before starting Kopia.
+See [Failed and interrupted runs](docs/usage.md#failed-and-interrupted-runs) for
+network failures, incomplete snapshots, verification, and closing the lid
+during an active operation.
 
 Every action-oriented manual run from a downloaded file compares its version
 with the installed copy. A newer version atomically refreshes the installed
@@ -191,6 +196,12 @@ overwriting the live vault.
 
 ## Current status
 
-The standalone flow and its scheduling behaviour have been tested locally with
-isolated command stubs. The remaining validation gate is a real end-to-end
-Kopia → rclone → MEGA backup and restore using a disposable vault.
+The weekend-project implementation is complete and in maintenance mode. The
+Kopia → rclone → MEGA flow has been validated end to end with disposable data:
+multiple snapshots, KopiaUI browsing and restores, and the CLI missing-only and
+overwrite restore modes. A real iCloud-hosted Obsidian vault has also been
+backed up and missing files restored successfully.
+
+Kopia's rclone backend still reports that it is not actively tested. This is an
+accepted residual risk, not an open implementation gate. Continue running
+periodic `--verify` checks and occasional restores into a separate directory.

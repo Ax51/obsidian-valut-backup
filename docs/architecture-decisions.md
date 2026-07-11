@@ -3,15 +3,16 @@
 ## Purpose and scope
 
 This project adds an independent, encrypted, offsite backup to an Obsidian vault
-that continues to use iCloud for day-to-day synchronisation. It must not modify
-the vault. The source path is configurable, so the initial setup can be tested
-entirely with a disposable fixture directory.
+that continues to use iCloud for day-to-day synchronisation. Backup mode must
+not modify the vault; the explicit manual restore mode is the only write path.
+The source path is configurable, so initial setup can be tested entirely with a
+disposable fixture directory.
 
 ## Decision status
 
-The target design is approved. The choice of backup engine is **Kopia, pending a
-small compatibility test with MEGA**. The test must succeed before the real
-vault is configured.
+The target design and **Kopia** choice are approved. The MEGA compatibility gate
+has passed with disposable data, and backup plus missing-file recovery have also
+been validated against the real iCloud-hosted vault.
 
 ## Chosen design
 
@@ -102,32 +103,41 @@ no-op, while an older copy is prevented from overwriting a newer installation.
 - Never restore over the live vault during validation. Restore to a sibling or
   temporary directory first.
 
-## Definition of done
+## Validation record
 
-Before using the real vault, the implementation must prove all of the following
-against a disposable test fixture:
+The implementation has demonstrated the following against disposable data:
 
 1. Create and upload an encrypted snapshot through Kopia, rclone, and MEGA.
 2. Run a second snapshot after adding, editing, moving, and deleting test files.
-3. Browse both snapshot histories in KopiaUI and mount one snapshot.
+3. Browse snapshot history and recover individual files through KopiaUI.
 4. Restore the newest snapshot into a separate directory and compare it with
    the expected fixture contents.
 5. Restore an older snapshot or an individual file to demonstrate version
    recovery.
-6. Verify repository data with Kopia after the upload.
+6. Restore only missing files through the CLI without changing an existing
+   newer file or existing directory metadata.
+7. Exercise the explicit overwrite mode against disposable data.
 
-After this succeeds, configure the real vault path and repeat a full restore to
-a neighbouring directory. That successful restore is the acceptance criterion.
+The real iCloud-hosted vault has subsequently been backed up, browsed in
+KopiaUI, and used for a successful missing-file restore. Periodic verification
+and separate-directory restore tests remain operational maintenance rather than
+unfinished development work.
 
-## Open risk and decision gate
+## Accepted residual risk
 
 Kopia's rclone repository backend is documented as experimental and its
-officially tested providers do not include MEGA. The project will therefore run
-the above isolated compatibility test first. If any of snapshot creation,
-listing, GUI browsing, mounting, full restore, or verification is unreliable,
-we will switch the engine to **Restic** while retaining rclone, MEGA, launchd,
-Keychain, and the same retention policy. This keeps the fallback small and
-avoids experimenting on the real vault.
+officially tested providers do not include MEGA. The completed compatibility
+test makes this risk acceptable for the small personal vault, but it does not
+turn MEGA into an officially supported Kopia provider. If future snapshot
+creation, listing, GUI browsing, restore, or verification becomes unreliable,
+the fallback remains **Restic** with rclone, MEGA, launchd, Keychain, and the
+same retention policy.
+
+Missing-only CLI restore downloads the entire latest snapshot into protected
+staging because Kopia's `--skip-existing` did not reliably protect arbitrary
+existing files in local testing. This makes a small recovery slower, but keeps
+the implementation predictable. Selective restores belong to KopiaUI and are
+not a reason to expand the standalone CLI.
 
 ## Explicit non-goals
 
@@ -136,3 +146,5 @@ avoids experimenting on the real vault.
 - A second remote provider or ransomware-resistant object locking in the first
   version.
 - Running a permanently active backup daemon.
+- Per-file or per-directory CLI restore; KopiaUI owns selective recovery.
+- Optimizing missing-only CLI restore by parsing Kopia's internal metadata.

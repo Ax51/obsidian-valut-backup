@@ -163,6 +163,8 @@ From a selected snapshot, KopiaUI can also:
 
 Mounting is convenient for exploration, but a complete restore into a separate
 directory remains the acceptance criterion for this project.
+Selective recovery intentionally belongs to KopiaUI; the standalone CLI does
+not duplicate per-file or per-directory restore controls.
 
 ## Troubleshooting
 

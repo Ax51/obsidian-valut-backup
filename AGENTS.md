@@ -61,6 +61,9 @@ include tests for missing, equal, newer, and older installed versions.
   with `rsync --ignore-existing`; do not rely on Kopia's `--skip-existing` to
   protect arbitrary existing files. The merge must not update metadata on
   directories that already exist.
+- Keep selective file and directory recovery in KopiaUI. Do not add per-path CLI
+  restore or metadata-parsing optimizations without an explicit architecture
+  decision; full-snapshot staging is an accepted tradeoff for this small vault.
 - Do not create or reconnect a real remote repository in automated tests.
 - Do not make scheduled execution interactive.
 - Preserve the explicit disclaimer acceptance gate for first-time manual use.
