@@ -1,70 +1,104 @@
 # Usage
 
-## Prerequisites
+The complete setup and backup flow lives in one standalone macOS script:
+[`obsidian-vault-backup.sh`](../obsidian-vault-backup.sh).
 
-Install the macOS versions of `kopia` and `rclone`. Keep the KopiaUI app
-installed: it is the recovery interface, while the scripts use the same Kopia
-engine through its CLI.
+## Download and run
 
-Before the first run, save two recovery records in Apple Passwords:
-
-1. the MEGA account recovery key; and
-2. a strong, unique Kopia repository password.
-
-The initial setup also writes the Kopia password to macOS Keychain so that a
-background `launchd` job can run without displaying a prompt. The Keychain copy
-is operational convenience, not the sole recovery copy.
-
-## Isolated acceptance test
-
-Run these commands from the project root. They only use a generated fixture.
+Download the script from GitHub and run it in Terminal:
 
 ```bash
-cp config/backup.env.example config/local.env
-scripts/create-test-fixture.sh create
+curl -fsSL https://raw.githubusercontent.com/Ax51/obsidian-valut-backup/main/obsidian-vault-backup.sh \
+  -o obsidian-vault-backup.sh
+chmod +x obsidian-vault-backup.sh
+./obsidian-vault-backup.sh
 ```
 
-Set the printed directory as `BACKUP_SOURCE` in `config/local.env`. Keep the
-provided `RCLONE_REMOTE_NAME=mega`, or change it to the name you choose in
-rclone.
+Downloading to a file is intentional: the script installs a permanent copy for
+`launchd`. Do not use `curl ... | bash`.
+
+The first run:
+
+1. checks that the computer is running macOS;
+2. offers to install Homebrew if it is missing;
+3. offers to install `kopia` and `rclone`, plus the optional KopiaUI app;
+4. asks for the vault path, MEGA credentials, remote folder, and schedule;
+5. stores non-secret settings under `~/config/obsidian-vault-backup` and the
+   MEGA remote in rclone's standard config so KopiaUI can see it;
+6. stores the Kopia repository password in macOS Keychain;
+7. creates or connects to the encrypted repository;
+8. runs a backup immediately; and
+9. installs one `launchd` schedule if it is not already present.
+
+The standard rclone config contains an obscured MEGA password. Obscuring
+prevents casual reading but is not strong encryption. rclone prints the config
+location during setup and restricts the file to the current macOS user. Keep the
+MEGA password, MEGA recovery key, and Kopia repository password in Apple
+Passwords as independent recovery records.
+
+## Options
+
+```text
+--source PATH          Override the saved source for this run only.
+--interval SECONDS     Override the schedule interval without saving the setting.
+--no-immediate-backup  Complete setup without starting a backup now.
+--no-schedule          Do not install or inspect the launchd schedule.
+--update-settings      Interactively update saved settings and credentials.
+--verify               Verify 100% of snapshot files after backup.
+-h, --help             Show built-in help.
+```
+
+Changing the remote name or remote folder is done through `--update-settings`,
+because those values identify the repository rather than just one backup run.
+If they change, the previous Kopia connection file is preserved with a timestamp
+before the script asks whether to create or connect to the new repository.
+Updating the Kopia password replaces only its local Keychain copy; it must match
+the password already used by the repository.
+
+## Safe acceptance test
+
+For the first run, point the script at a disposable folder rather than the real
+vault. Put several Markdown files and a `.obsidian` directory in it, run a
+backup, edit the files, and run the installed script again:
 
 ```bash
-scripts/setup.sh
-scripts/setup.sh --create-repository
-scripts/run-backup.sh
-scripts/create-test-fixture.sh mutate /tmp/obsidian-vault-backup-fixture.XXXXXX
-scripts/run-backup.sh
+~/config/obsidian-vault-backup/obsidian-vault-backup.sh --no-schedule --verify
 ```
 
-The first setup invokes `rclone config` if the named remote does not yet exist.
-Create a MEGA remote there and return to the script. `setup.sh` asks for the
-Kopia password only if its Keychain entry is missing.
-
-Open KopiaUI, connect it to the newly created rclone repository, and use the
-same repository password. Confirm that both revisions are visible; mount one
-and restore the latest one into a separate directory. Do not restore over the
-fixture or a live vault.
-
-Finally, verify every backed-up file:
+Open KopiaUI, choose **Rclone Remote**, and connect using the rclone executable,
+the same remote path (for example `mega:ObsidianVaultBackup`), and the Kopia
+password. Because the script uses rclone's standard config, the remote is
+available to KopiaUI too. Confirm that both revisions can be browsed, mount a
+snapshot, and restore it into a separate folder. After this passes, update the
+source path:
 
 ```bash
-scripts/verify-backup.sh
+~/config/obsidian-vault-backup/obsidian-vault-backup.sh \
+  --update-settings --no-immediate-backup
 ```
 
-## Enable the real vault only after the test passes
+Then run the script normally to back up the real vault and install the daily
+schedule.
 
-Change `BACKUP_SOURCE` to the real vault path, run one manual backup, and
-restore it to a neighbouring directory. Once that passes, enable the agent:
+## Files created on the Mac
 
-```bash
-scripts/install-launchd.sh
+```text
+~/config/obsidian-vault-backup/
+├── obsidian-vault-backup.sh  permanent runnable copy
+├── settings.sh               source, remote, and interval settings
+├── repository.config         Kopia connection metadata
+└── backup.log                launchd output
+
+~/Library/LaunchAgents/
+└── com.example.obsidian-vault-backup.plist
 ```
 
-The agent runs once at login and then every 24 hours. Its log is in
-`logs/launchd.log`; a concurrent run is skipped.
+The Kopia repository password is stored separately in macOS Keychain.
+The MEGA remote is stored in rclone's standard config; run `rclone config file`
+to print its location.
 
 ## Restore
 
-Use KopiaUI to browse the snapshot history, mount a snapshot, or restore the
-entire vault to a new directory. Keep the old vault untouched until the restored
-copy is checked in Obsidian.
+Use KopiaUI to browse history, download individual notes, mount a snapshot, or
+restore the whole vault. Always restore into a new directory first; keep the
+live vault untouched until the restored copy has been checked in Obsidian.

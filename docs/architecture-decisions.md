@@ -27,7 +27,7 @@ rclone remote (MEGA transport)
         v
 MEGA repository
 
-launchd runs the backup script after a missed scheduled run.
+launchd runs the installed standalone script on its configured interval.
 KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 ```
 
@@ -38,8 +38,8 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 | Backup engine | Kopia | GUI makes history browsing, mounting, and complete restores more approachable; CLI remains suitable for automation. |
 | Remote transport | rclone | Required for MEGA, which is not a native Kopia repository backend. Kopia starts and manages rclone once the remote is configured. |
 | Remote storage | MEGA free tier | The vault is approximately 40–45 MB, so the available quota is sufficient with the selected retention policy. |
-| Scheduler | macOS `launchd` | Native scheduler; configured to run missed jobs after the Mac next becomes available. |
-| Secret store | macOS Keychain via `security` | The script asks for missing secrets once and then reads them non-interactively. No secret is committed to this repository. |
+| Scheduler | macOS `launchd` | Native scheduler; one user agent invokes the installed standalone script at the configured interval. |
+| Secret storage | macOS Keychain and a restricted rclone config | The Kopia password lives in Keychain. rclone stores the MEGA password in its obscured format in a file readable only by the current macOS user. Recovery copies live in Apple Passwords. |
 | Human recovery interface | KopiaUI | It can browse history, mount a snapshot, restore individual items, or restore the entire vault into another directory. |
 
 ## Backup policy
@@ -53,13 +53,23 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 Kopia's own policy supports retention and a snapshot interval, but `launchd` is
 the source of truth for this project. This keeps scheduling, Keychain access,
 logging, and retry behaviour in one macOS-native entry point. The Kopia policy
-will enforce retention and may be set to manual scheduling to avoid duplicate
-runs.
+uses manual scheduling to avoid duplicate runs.
+
+The complete operational flow is distributed as one standalone script. On its
+first interactive run it copies itself to
+`~/config/obsidian-vault-backup/obsidian-vault-backup.sh`, where the launchd
+agent can invoke it from a stable path. The same directory contains the user's
+settings and the Kopia connection. The MEGA remote uses rclone's standard
+config location so that Kopia CLI and KopiaUI can both discover it.
 
 ## Security and recovery
 
 - Store the Kopia repository password and MEGA credentials in Apple Passwords
-  as the recovery record, and in Keychain only as the automation runtime store.
+  as independent recovery records.
+- Store the Kopia repository password in Keychain for unattended automation.
+- rclone stores the MEGA password in obscured form in its mode-`600` config.
+  Obscuring is reversible and protects against casual viewing, not an attacker
+  who already has access to the macOS account.
 - Store the MEGA recovery key in Apple Passwords too.
 - Losing the Kopia repository password makes the encrypted repository
   unrecoverable; changing or deleting the local Keychain item must not be the

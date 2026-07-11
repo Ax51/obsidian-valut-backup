@@ -1,42 +1,129 @@
-## What is this project
-This is a future backup setup for my Obsidian vault.
+# Obsidian Vault Backup
 
-The vault already lives in iCloud and I want to keep it that way. This project is only about adding an extra backup layer on top of the current storage.
+A standalone macOS script that creates encrypted, versioned backups of an
+Obsidian vault in MEGA.
 
-## Current idea
-- use `restic` or `kopia` to create backup snapshots
-- use `rclone` as a transport layer to push backups into cloud storage
-- store backups in `Mega` free tier (`20 GB`)
-- make sure backups are encrypted because some notes contain sensitive data
-- run backups by schedule on my Mac
+The vault can continue living in iCloud: this project adds an independent
+offsite backup layer and does not replace the existing sync workflow.
 
-## Why this is interesting
-- iCloud sync is not the same as backup
-- snapshots give versioned recovery instead of just "latest state"
-- encrypted offsite copy reduces the risk of local device loss
-- the vault can stay in the current iCloud-based workflow without migration
+## How it works
 
-## Open decisions
-- `restic` vs `kopia`
-- whether `rclone` is really needed if the backup tool can already work well with the selected target
-- snapshot frequency
-- retention policy
-- restore workflow testing
-- how much of the `20 GB` Mega free tier is realistically usable for this vault over time
+```text
+Obsidian vault in iCloud
+          │
+          ▼
+Kopia encrypted snapshots
+          │
+          ▼
+rclone transport
+          │
+          ▼
+MEGA repository
+```
 
-## Rough architecture
-1. Obsidian vault stays in `iCloud`
-2. A scheduled job on Mac creates encrypted snapshots
-3. Backup data is uploaded to cloud storage through `rclone`
-4. Recovery should be possible for a single file, note folder, or the whole vault
+- **Kopia** provides encryption, compression, deduplication, snapshots, and
+  retention.
+- **rclone** connects Kopia to MEGA.
+- **launchd** runs the backup automatically on macOS.
+- **KopiaUI** provides visual history browsing, mounting, and restores.
 
-## Success criteria
-- backups run automatically
-- snapshots are encrypted at rest
-- restore steps are documented and verified
-- solution fits into the Mega free tier, at least for the current vault size
+The default retention policy keeps 14 daily, 8 weekly, and 12 monthly
+snapshots. The whole selected directory is backed up, including `.obsidian/`.
 
-## Implementation
+## Quick start
 
+Download the standalone script and run it in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ax51/obsidian-valut-backup/main/obsidian-vault-backup.sh \
+  -o obsidian-vault-backup.sh
+chmod +x obsidian-vault-backup.sh
+./obsidian-vault-backup.sh
+```
+
+Download it to a file instead of piping it into Bash. The script needs a local
+copy so it can install itself at a stable path for scheduled runs.
+
+During the first run, the script:
+
+1. checks that it is running on macOS;
+2. offers to install Homebrew when necessary;
+3. offers to install Kopia, rclone, and KopiaUI;
+4. asks for the source directory and MEGA credentials;
+5. creates or connects to an encrypted Kopia repository;
+6. runs the first backup immediately; and
+7. installs one `launchd` schedule without creating duplicates.
+
+Settings and the permanent script are stored under:
+
+```text
+~/config/obsidian-vault-backup
+```
+
+## Command-line options
+
+```text
+--source PATH          Use a different source for this run only.
+--interval SECONDS     Override the schedule interval without saving it.
+--no-immediate-backup  Configure the flow without starting a backup now.
+--no-schedule          Do not install or inspect the launchd schedule.
+--update-settings      Update saved settings and credentials interactively.
+--verify               Verify 100% of snapshot files after the backup.
+-h, --help             Show built-in help.
+```
+
+For example, configure everything without performing the first backup:
+
+```bash
+./obsidian-vault-backup.sh --no-immediate-backup
+```
+
+Update settings later using the installed copy:
+
+```bash
+~/config/obsidian-vault-backup/obsidian-vault-backup.sh --update-settings
+```
+
+## Test before using the real vault
+
+Kopia's rclone repository backend is experimental, and MEGA is not listed as an
+officially tested provider. Point the first run at a disposable test directory,
+not the real vault.
+
+The acceptance test is complete only after you can:
+
+1. create at least two snapshots with changed files;
+2. verify the repository with `--verify`;
+3. browse both versions in KopiaUI;
+4. mount a snapshot; and
+5. restore the complete test vault into a separate directory.
+
+After that, update the source to the real vault and perform another full restore
+into a neighbouring directory before relying on the schedule.
+
+## Security
+
+- Kopia encrypts repository contents before they leave the Mac.
+- The Kopia repository password is stored in macOS Keychain for unattended
+  backups.
+- rclone stores the MEGA password in obscured form in its standard config.
+  Obscuring prevents casual viewing but is not strong encryption.
+- Local configuration files are restricted to the current macOS user.
+- The MEGA password, MEGA recovery key, and Kopia repository password should
+  also be kept in Apple Passwords as independent recovery records.
+
+Losing the Kopia repository password makes the encrypted backup unrecoverable.
+Always restore into a new directory first; never validate recovery by
+overwriting the live vault.
+
+## Documentation
+
+- [Standalone backup script](obsidian-vault-backup.sh)
+- [Setup, acceptance test, and restore guide](docs/usage.md)
 - [Architecture decisions](docs/architecture-decisions.md)
-- [Setup, isolated acceptance test, and recovery guide](docs/usage.md)
+
+## Current status
+
+The standalone flow and its scheduling behaviour have been tested locally with
+isolated command stubs. The remaining validation gate is a real end-to-end
+Kopia → rclone → MEGA backup and restore using a disposable vault.
