@@ -55,7 +55,9 @@ directory during that run. A previously saved relative source is rejected and
 must be entered again manually; launchd never guesses how to resolve it. Paths
 dragged from Finder or copied in shell-escaped form are accepted: backslashes in
 inputs such as `Mobile\ Documents/com\~apple\~CloudDocs` are decoded before the
-directory is resolved.
+directory is resolved. This decoding belongs to the standalone script only.
+KopiaUI destination fields require raw, unescaped paths; see the
+[restore-path warning](kopia-ui.md#restore-the-whole-vault).
 
 ## Options
 

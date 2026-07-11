@@ -122,15 +122,33 @@ Ignore identical snapshots:  true
 
 1. In **Snapshots**, open the snapshot you want to test.
 2. Choose **Restore**.
-3. Select a new, empty destination outside the live vault, for example:
+3. Select a new, empty destination outside the live vault. Prefer the folder
+   chooser. If entering it manually, use a complete absolute path, for example:
 
    ```text
-   ~/Desktop/ObsidianVault-Restore-Test
+   /Users/<your-macos-username>/Downloads/ObsidianVault-Restore-Test
    ```
 
-4. Restore the complete snapshot and wait for the operation to finish.
-5. Compare the restored directory with the expected vault contents.
-6. Open the restored directory as a separate vault in Obsidian and verify notes,
+4. Enter the path exactly as it exists in Finder: do not add quotes or shell
+   backslashes. KopiaUI passes the field directly to Kopia; no shell removes
+   escape characters. For example:
+
+   ```text
+   Correct: /Users/me/Library/Mobile Documents/com~apple~CloudDocs/restore-test
+   Wrong:   /Users/me/Library/Mobile\ Documents/com\~apple\~CloudDocs/restore-test
+   ```
+
+   The wrong form creates directories whose names literally contain `\`, so a
+   task can succeed while the expected destination appears unchanged. A path
+   dragged into Terminal may be shell-escaped and must not be copied unchanged
+   into KopiaUI.
+5. For a full restore test, enable **Write files atomically**. Keep **Shallow
+   Restore At Depth** at `1000` (effectively a full restore for a normal vault)
+   and do not lower it. Leave **Continue on Errors** disabled so the task fails
+   visibly if any item cannot be restored.
+6. Restore the complete snapshot and wait for the operation to finish.
+7. Compare the restored directory with the expected vault contents.
+8. Open the restored directory as a separate vault in Obsidian and verify notes,
    attachments, links, and settings.
 
 Never test a restore by writing over the live iCloud vault.
@@ -193,8 +211,21 @@ First confirm that the CLI backup completed successfully:
 
 Then reconnect KopiaUI using the same remote path and repository password.
 
+### Restore succeeds but the destination appears unchanged
+
+Open the completed task and inspect its log for `WriteFile` lines. They show the
+exact path Kopia used. If those paths contain visible `\` characters before
+spaces or `~`, the shell-escaped destination was treated literally and the
+files were restored into a different directory tree.
+
+Locate that unintended directory in Finder, verify that it contains only the
+restore output, and remove it manually. Repeat the restore into a new empty
+directory using an absolute, unescaped path. Options such as **Skip previously
+restored files and symlinks** do not correct a malformed destination path.
+
 ## Further reading
 
 - [Kopia repository and rclone documentation](https://kopia.io/docs/repositories/)
 - [KopiaUI getting started and restore documentation](https://kopia.io/docs/getting-started/)
+- [Kopia restore option reference](https://kopia.io/docs/reference/command-line/common/snapshot-restore/)
 - [Kopia installation documentation](https://kopia.io/docs/installation/)
