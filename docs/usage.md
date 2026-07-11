@@ -228,11 +228,10 @@ automatic full maintenance later garbage-collects unreachable content. Cleanup
 is intentionally delayed by Kopia's safety windows and may take multiple
 maintenance cycles.
 
-Source fingerprinting retries transient `find`/`stat` failures three times and
-writes diagnostics to the backup log. This prevents a file that disappears or
-temporarily becomes unavailable during an iCloud update from aborting a
-scheduled run without explanation. Persistent fingerprint failures still stop
-the backup before Kopia reads the source.
+Manual source fingerprinting retries transient `find`/`stat` failures three
+times and writes diagnostics to the log. Scheduled runs deliberately do not
+walk an iCloud source with these general-purpose shell tools: macOS can grant
+Kopia narrow File Provider access without granting Full Disk Access to Bash.
 
 Kopia's daily maintenance checks snapshot structure and required blobs, but a
 full payload check requires `--verify`, which downloads, decrypts, and
@@ -271,10 +270,13 @@ multiple sleeping events are coalesced. An event missed while the Mac is fully
 powered off is not recovered and waits for the next calendar day.
 
 After a scheduled launch, the script retries MEGA access for up to five minutes,
-waits for the configured soak period (10 minutes by default), and verifies that
-the source metadata remains stable. This ordering gives iCloud time to settle
-after network connectivity returns. `--inspect` reports the configured calendar
-time, soak, next calendar event, launchd state, and last exit code.
+waits for the configured soak period (10 minutes by default), creates a Kopia
+snapshot, waits 60 seconds, and requests a follow-up snapshot. The repository
+policy ignores the follow-up when it is identical; otherwise it captures files
+that changed during the first pass. This ordering gives iCloud time to settle
+without requiring Bash, `find`, or `stat` to enumerate the protected source.
+`--inspect` reports the configured calendar time, soak, next calendar event,
+launchd state, and last exit code.
 
 Changing the remote name or remote folder is done through `--update-settings`,
 because those values identify the repository rather than just one backup run.
@@ -323,37 +325,31 @@ then require network downloads or fail while the Mac is offline. Perform a
 manual backup and complete restore after switching to the real iCloud vault.
 
 There is no stable public macOS command that proves an iCloud folder is fully
-synchronized. The soak and quiet-window checks are therefore best-effort, not
-an atomic filesystem snapshot. If files change while Kopia is reading them, the
-script creates one follow-up snapshot. Continuous changes or unreadable files
-still cause the scheduled run to fail rather than claim a clean backup.
+synchronized. The soak and follow-up snapshot are therefore best-effort, not an
+atomic filesystem snapshot. If files change while Kopia is reading the first
+snapshot, the follow-up captures their newer state. Continuous changes or
+unreadable files can still cause the scheduled run to fail rather than claim a
+clean backup.
 
 ### Scheduled iCloud access on macOS
 
-macOS privacy controls can allow an interactive Terminal session to read iCloud
-Drive while denying the same access to a background launchd process. The usual
-symptom is a scheduled exit code of `1` and this diagnostic in `backup.log`:
+The first time Kopia reads an iCloud-backed vault, macOS may ask whether Kopia
+may access files managed by iCloud Drive. Choose **Allow**. macOS records this as
+a File Provider permission for the Kopia executable, separately from Terminal
+or Bash. KopiaUI has its own application identity and may ask independently.
+Because Homebrew installs versioned Kopia executables, macOS may ask again
+after a Kopia upgrade.
 
-```text
-find: /Users/.../Library/Mobile Documents/...: Operation not permitted
-```
+The scheduled workflow intentionally lets Kopia be the only process that
+enumerates the vault. Do not grant Full Disk Access to `/bin/bash`, `find`, or
+`stat`; that would give every Bash script or invocation of those shared system
+tools unnecessarily broad access. If Kopia was denied previously, review its
+entry under **System Settings → Privacy & Security → Files & Folders**, then run
+a manual backup once so macOS can present the request again.
 
-If this happens, open **System Settings → Privacy & Security → Full Disk
-Access**, click **+**, authenticate, press **Command-Shift-G** in the file
-chooser, enter `/bin/bash`, and add and enable it. Then run a short scheduled
-test before relying on the daily job. Start with `/bin/bash` only; do not add
-`find`, `stat`, or Kopia unless a later log names one of them as the denied
-process.
-
-This permission is broad: it applies to every Bash script executed as the
-current user, not just this backup script. Grant it only if that tradeoff is
-acceptable. A narrowly permissioned, signed application wrapper would avoid
-granting access to the shared Bash interpreter, but is intentionally outside
-this single-file project's scope.
-
-See Apple's documentation for
-[protected file locations](https://support.apple.com/guide/security/controlling-app-access-to-files-secddd1d86a6/web)
-and [Full Disk Access](https://support.apple.com/guide/mac-help/control-access-to-files-and-folders-on-mac-mchld5a35146/mac).
+Apple documents iCloud Drive as a protected file location and explains that
+access is controlled per application in
+[Controlling app access to files in macOS](https://support.apple.com/guide/security/controlling-app-access-to-files-secddd1d86a6/web).
 
 ## Safe acceptance test
 

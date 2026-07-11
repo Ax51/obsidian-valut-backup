@@ -5,7 +5,7 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="1.0.2"
+readonly SCRIPT_VERSION="1.1.0"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
 readonly SYSTEM_USER="$(id -un)"
@@ -25,7 +25,6 @@ readonly DEFAULT_REMOTE_PATH="ObsidianVaultBackup"
 readonly DEFAULT_SCHEDULE_TIME="03:00"
 readonly DEFAULT_SOAK_MINUTES=10
 readonly SOURCE_QUIET_SECONDS=60
-readonly SOURCE_QUIET_MAX_ATTEMPTS=5
 readonly FINGERPRINT_MAX_ATTEMPTS=3
 readonly FINGERPRINT_RETRY_SECONDS=5
 readonly REMOTE_RETRY_SECONDS=30
@@ -814,7 +813,7 @@ source_fingerprint() {
     warn "Fingerprint errors (up to the first 10 lines):"
     sed -n '1,10p' "$error_file" >&2
     if grep -q 'Operation not permitted' "$error_file"; then
-      warn "macOS denied background access to the source. For an iCloud vault, see the Full Disk Access instructions in docs/usage.md."
+      warn "macOS denied access to the source. Allow iCloud access for the terminal running this manual backup."
     fi
   else
     warn "The fingerprint pipeline failed without find/stat diagnostics."
@@ -844,47 +843,14 @@ source_fingerprint_with_retry() {
 }
 
 wait_for_source_after_wake() {
-  local before=""
-  local after=""
-  local attempt=1
   local soak_seconds=$((SOAK_MINUTES * 60))
 
-  before="$(source_fingerprint_with_retry)" || die \
-    "Source could not be fingerprinted after $FINGERPRINT_MAX_ATTEMPTS attempts."
   if (( soak_seconds > 0 )); then
     info "Scheduled wake-up soak: waiting $SOAK_MINUTES minute(s)"
     sleep "$soak_seconds"
   else
-    info "Scheduled wake-up soak disabled; checking a $SOURCE_QUIET_SECONDS-second quiet window"
-    sleep "$SOURCE_QUIET_SECONDS"
+    info "Scheduled wake-up soak disabled"
   fi
-  after="$(source_fingerprint_with_retry)" || die \
-    "Source could not be fingerprinted after the scheduled soak."
-
-  [[ "$before" == "$after" ]] && {
-    success "Source tree remained stable during the soak"
-    return 0
-  }
-
-  warn "Source tree changed during the soak; waiting for a quiet window."
-  before="$after"
-  while (( attempt <= SOURCE_QUIET_MAX_ATTEMPTS )); do
-    sleep "$SOURCE_QUIET_SECONDS"
-    if ! after="$(source_fingerprint_with_retry)"; then
-      warn "Source fingerprint is still unavailable; continuing the quiet-window checks."
-      attempt=$((attempt + 1))
-      continue
-    fi
-    if [[ "$before" == "$after" ]]; then
-      success "Source tree is stable after $SOURCE_QUIET_SECONDS seconds"
-      return 0
-    fi
-    warn "Source is still changing (quiet check $attempt/$SOURCE_QUIET_MAX_ATTEMPTS)."
-    before="$after"
-    attempt=$((attempt + 1))
-  done
-
-  die "Source did not become stable; scheduled backup was aborted to avoid a mixed snapshot."
 }
 
 wait_for_remote_after_wake() {
@@ -929,18 +895,25 @@ run_backup() {
   printf 'Source: %s\n' "$SOURCE_PATH"
   printf 'Destination: %s\n' "$(repository_remote_spec)"
 
-  fingerprint_before="$(source_fingerprint_with_retry)" || die \
-    "Source could not be fingerprinted before backup."
-  kopia_run snapshot create "$SOURCE_PATH"
-  if ! fingerprint_after="$(source_fingerprint_with_retry)"; then
-    warn "Could not fingerprint the source after backup; creating one follow-up snapshot."
+  if [[ "$SCHEDULED_RUN" == true ]]; then
     kopia_run snapshot create "$SOURCE_PATH"
-    fingerprint_after="$fingerprint_before"
-  fi
+    info "Waiting $SOURCE_QUIET_SECONDS seconds before the scheduled follow-up snapshot"
+    sleep "$SOURCE_QUIET_SECONDS"
+    kopia_run snapshot create "$SOURCE_PATH"
+  else
+    fingerprint_before="$(source_fingerprint_with_retry)" || die \
+      "Source could not be fingerprinted before backup."
+    kopia_run snapshot create "$SOURCE_PATH"
+    if ! fingerprint_after="$(source_fingerprint_with_retry)"; then
+      warn "Could not fingerprint the source after backup; creating one follow-up snapshot."
+      kopia_run snapshot create "$SOURCE_PATH"
+      fingerprint_after="$fingerprint_before"
+    fi
 
-  if [[ "$fingerprint_before" != "$fingerprint_after" ]]; then
-    warn "Source changed while Kopia was reading it; creating one follow-up snapshot."
-    kopia_run snapshot create "$SOURCE_PATH"
+    if [[ "$fingerprint_before" != "$fingerprint_after" ]]; then
+      warn "Source changed while Kopia was reading it; creating one follow-up snapshot."
+      kopia_run snapshot create "$SOURCE_PATH"
+    fi
   fi
 
   record_backup_success

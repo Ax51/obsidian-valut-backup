@@ -9,8 +9,8 @@ offsite backup layer and does not replace the existing sync workflow.
 > [!IMPORTANT]
 > If the vault is stored in iCloud Drive, enable **Keep Downloaded** for the
 > vault (or its enclosing Obsidian folder) in Finder before relying on scheduled
-> backups. macOS may also require Full Disk Access for `/bin/bash` before a
-> background launchd job can read iCloud Drive. See
+> backups. When macOS asks whether Kopia may access iCloud Drive, approve that
+> narrowly scoped request; Full Disk Access for `/bin/bash` is not required. See
 > [Using an iCloud vault](docs/usage.md#using-an-icloud-vault).
 
 ## How it works
@@ -146,7 +146,8 @@ changing anything:
 Scheduled backups use a daily wake-aware calendar event, defaulting to 03:00
 local time. If the Mac is asleep, launchd starts the job after wake. The script
 then waits for MEGA connectivity, applies the configured soak period (10 minutes
-by default), and checks that the source tree has settled before starting Kopia.
+by default), creates a snapshot, waits for a quiet window, and asks Kopia for a
+follow-up snapshot. Kopia discards the follow-up when the source is unchanged.
 See [Failed and interrupted runs](docs/usage.md#failed-and-interrupted-runs) for
 network failures, incomplete snapshots, verification, and closing the lid
 during an active operation.
