@@ -38,6 +38,11 @@ is not shown again after the user agrees. Declining does not write an acceptance
 record. The internal `--scheduled-run` mode is deliberately non-interactive so
 launchd backups can complete unattended.
 
+All interactive yes/no questions use `[y/N]`: only an explicit `y`, `Y`, `yes`,
+or `YES` accepts. Pressing **Return** selects `No`. This applies to the
+disclaimer, software installation, credential replacement, and optional shell
+command, so no affirmative action is implied by an empty answer.
+
 The standard rclone config contains an obscured MEGA password. Obscuring
 prevents casual reading but is not strong encryption. rclone prints the config
 location during setup and restricts the file to the current macOS user. Keep the
@@ -98,7 +103,7 @@ $(brew --prefix)/bin/obsidian-backup
 
 A symlink in Homebrew's existing `bin` directory is shell-independent and does
 not require editing `.zshrc`, `.zprofile`, or Bash configuration. Accepting the
-`[Y/n]` prompt makes future manual runs available from any directory as:
+`[y/N]` prompt makes future manual runs available from any directory as:
 
 ```bash
 obsidian-backup

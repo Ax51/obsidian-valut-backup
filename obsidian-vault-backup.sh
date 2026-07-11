@@ -5,7 +5,7 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="0.4.0"
+readonly SCRIPT_VERSION="0.5.0"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
 readonly SYSTEM_USER="$(id -un)"
@@ -97,17 +97,6 @@ prompt_secret() {
 confirm() {
   local prompt="$1"
   local answer=""
-  printf '%s [Y/n]: ' "$prompt" >&2
-  IFS= read -r answer || die "Input stream closed before an answer was provided."
-  case "$answer" in
-    ''|y|Y|yes|YES) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-confirm_no_default() {
-  local prompt="$1"
-  local answer=""
   printf '%s [y/N]: ' "$prompt" >&2
   IFS= read -r answer || die "Input stream closed before an answer was provided."
   case "$answer" in
@@ -152,7 +141,7 @@ $PROJECT_URL
 
 EOF
 
-  confirm_no_default "Do you understand and want to continue?" || {
+  confirm "Do you understand and want to continue?" || {
     printf 'Cancelled. No setup or backup actions were performed.\n'
     exit 0
   }
@@ -600,7 +589,7 @@ configure_settings_interactively() {
   "$RCLONE_BIN" listremotes 2>/dev/null | \
     grep -Fxq "${REMOTE_NAME}:" && remote_already_exists=true
   if [[ "$remote_already_exists" == true ]]; then
-    if confirm_no_default "Update the saved MEGA password?"; then
+    if confirm "Update the saved MEGA password?"; then
       mega_password="$(prompt_secret "MEGA password")"
       [[ -n "$mega_password" ]] || die "MEGA password cannot be empty."
     fi
@@ -627,7 +616,7 @@ configure_settings_interactively() {
   fi
 
   if keychain_password >/dev/null 2>&1; then
-    if confirm_no_default "Replace the Kopia repository password stored in Keychain?"; then
+    if confirm "Replace the Kopia repository password stored in Keychain?"; then
       printf 'This changes only the local Keychain copy; enter the password that the repository already uses.\n'
       prompt_and_store_repository_password
     fi
