@@ -5,7 +5,7 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="1.3.1"
+readonly SCRIPT_VERSION="1.3.2"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly REMOTE_SCRIPT_URL="https://raw.githubusercontent.com/Ax51/obsidian-valut-backup/refs/heads/main/obsidian-vault-backup.sh"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
