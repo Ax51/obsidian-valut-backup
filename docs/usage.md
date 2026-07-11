@@ -29,8 +29,9 @@ The first run:
    MEGA remote in rclone's standard config so KopiaUI can see it;
 7. stores the Kopia repository password in macOS Keychain;
 8. creates or connects to the encrypted repository;
-9. runs a backup immediately; and
-10. installs one `launchd` schedule if it is not already present.
+9. offers to install the `obsidian-backup` shell command;
+10. runs a backup immediately; and
+11. installs one `launchd` schedule if it is not already present.
 
 Acceptance and its UTC timestamp are stored in `settings.sh`, so the disclaimer
 is not shown again after the user agrees. Declining does not write an acceptance
@@ -84,6 +85,29 @@ Action-oriented manual runs compare their semantic version with the copy in
 atomically, an equal version is a no-op, and an older version stops instead of
 overwriting a newer installation. Read-only `--help`, `--version`, and
 `--inspect` calls exit before the installed-copy update.
+
+## Optional shell command
+
+On the first action-oriented manual run after this feature becomes available,
+the script offers to create:
+
+```text
+$(brew --prefix)/bin/obsidian-backup
+  -> ~/.config/obsidian-vault-backup/obsidian-vault-backup.sh
+```
+
+A symlink in Homebrew's existing `bin` directory is shell-independent and does
+not require editing `.zshrc`, `.zprofile`, or Bash configuration. Accepting the
+`[Y/n]` prompt makes future manual runs available from any directory as:
+
+```bash
+obsidian-backup
+```
+
+The script never overwrites an existing file, symlink, or command with that
+name. Declining is remembered, so ordinary runs do not ask repeatedly. Run with
+`--update-settings` to receive the offer again. Updating the permanent script
+does not require recreating the symlink because its destination path is stable.
 
 ## Common flag combinations
 
@@ -248,6 +272,9 @@ schedule.
 
 ~/Library/LaunchAgents/
 └── com.<system-user>.obsidian-vault-backup.plist
+
+$(brew --prefix)/bin/
+└── obsidian-backup              optional symlink to the permanent script
 ```
 
 The Kopia repository password is stored separately in macOS Keychain.

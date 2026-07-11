@@ -58,8 +58,10 @@ During the first run, the script:
 4. offers to install Kopia, rclone, and KopiaUI;
 5. asks for the source directory and MEGA credentials;
 6. creates or connects to an encrypted Kopia repository;
-7. runs the first backup immediately; and
-8. installs one `launchd` schedule without creating duplicates.
+7. offers to add the `obsidian-backup` command through a Homebrew `bin`
+   symlink;
+8. runs the first backup immediately; and
+9. installs one `launchd` schedule without creating duplicates.
 
 After acceptance, the script records `DISCLAIMER_ACCEPTED=true` and an
 acceptance timestamp in `~/.config/obsidian-vault-backup/settings.sh`. Later
@@ -70,6 +72,15 @@ Settings and the permanent script are stored under:
 
 ```text
 ~/.config/obsidian-vault-backup
+```
+
+If accepted, the optional shell command is installed as
+`$(brew --prefix)/bin/obsidian-backup` and points to the permanent script. It
+does not modify shell profile files. Afterwards, a manual backup can be started
+from any directory with:
+
+```bash
+obsidian-backup
 ```
 
 Source paths are normalized before they are saved. A relative input such as

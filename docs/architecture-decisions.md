@@ -39,6 +39,7 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 | Remote transport | rclone | Required for MEGA, which is not a native Kopia repository backend. Kopia starts and manages rclone once the remote is configured. |
 | Remote storage | MEGA free tier | The vault is approximately 40–45 MB, so the available quota is sufficient with the selected retention policy. |
 | Scheduler | macOS `launchd` | A daily `StartCalendarInterval` event provides wake-after-sleep catch-up. A configurable soak and preflight run before Kopia. |
+| Manual shell entry point | Optional Homebrew `bin` symlink | `obsidian-backup` works across shells without modifying user profile files and continues to target the stable installed script after atomic upgrades. |
 | Secret storage | macOS Keychain and a restricted rclone config | The Kopia password lives in Keychain. rclone stores the MEGA password in its obscured format in a file readable only by the current macOS user. Recovery copies live in Apple Passwords. |
 | Human recovery interface | KopiaUI | It can browse history, mount a snapshot, restore individual items, or restore the entire vault into another directory. |
 
@@ -69,6 +70,12 @@ first interactive run it copies itself to
 agent can invoke it from a stable path. The same directory contains the user's
 settings and the Kopia connection. The MEGA remote uses rclone's standard
 config location so that Kopia CLI and KopiaUI can both discover it.
+
+After explicit interactive consent, the script may create
+`$(brew --prefix)/bin/obsidian-backup` as a symlink to the stable installed
+copy. It never modifies shell startup files or replaces an existing command.
+Declining the offer is persisted, while `--update-settings` provides an explicit
+way to receive the offer again.
 
 The script carries a semantic version. Manual runs atomically refresh the
 installed copy only when the running version is newer. Equal versions are a
