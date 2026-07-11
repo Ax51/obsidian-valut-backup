@@ -5,7 +5,7 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="1.0.2"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
 readonly SYSTEM_USER="$(id -un)"
@@ -26,6 +26,8 @@ readonly DEFAULT_SCHEDULE_TIME="03:00"
 readonly DEFAULT_SOAK_MINUTES=10
 readonly SOURCE_QUIET_SECONDS=60
 readonly SOURCE_QUIET_MAX_ATTEMPTS=5
+readonly FINGERPRINT_MAX_ATTEMPTS=3
+readonly FINGERPRINT_RETRY_SECONDS=5
 readonly REMOTE_RETRY_SECONDS=30
 readonly REMOTE_MAX_ATTEMPTS=10
 
@@ -791,8 +793,54 @@ cleanup_operation() {
 }
 
 source_fingerprint() {
-  find "$SOURCE_PATH" -type f -exec stat -f '%N|%z|%m' {} + 2>/dev/null | \
-    LC_ALL=C sort | shasum -a 256 | awk '{ print $1 }'
+  local error_file=""
+  local fingerprint=""
+  local status=0
+
+  error_file="$(mktemp "$APP_DIR/fingerprint-errors.XXXXXX")"
+  if fingerprint="$(
+    find "$SOURCE_PATH" -type f -exec stat -f '%N|%z|%m' {} + 2>"$error_file" | \
+      LC_ALL=C sort | shasum -a 256 | awk '{ print $1 }'
+  )"; then
+    rm -f "$error_file"
+    printf '%s' "$fingerprint"
+    return 0
+  else
+    status=$?
+  fi
+
+  warn "Source fingerprint failed with exit code $status."
+  if [[ -s "$error_file" ]]; then
+    warn "Fingerprint errors (up to the first 10 lines):"
+    sed -n '1,10p' "$error_file" >&2
+    if grep -q 'Operation not permitted' "$error_file"; then
+      warn "macOS denied background access to the source. For an iCloud vault, see the Full Disk Access instructions in docs/usage.md."
+    fi
+  else
+    warn "The fingerprint pipeline failed without find/stat diagnostics."
+  fi
+  rm -f "$error_file"
+  return "$status"
+}
+
+source_fingerprint_with_retry() {
+  local attempt=1
+  local fingerprint=""
+
+  while (( attempt <= FINGERPRINT_MAX_ATTEMPTS )); do
+    if fingerprint="$(source_fingerprint)"; then
+      printf '%s' "$fingerprint"
+      return 0
+    fi
+    warn "Source fingerprint attempt $attempt/$FINGERPRINT_MAX_ATTEMPTS failed."
+    if (( attempt < FINGERPRINT_MAX_ATTEMPTS )); then
+      warn "Retrying source fingerprint in $FINGERPRINT_RETRY_SECONDS seconds."
+      sleep "$FINGERPRINT_RETRY_SECONDS"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  return 1
 }
 
 wait_for_source_after_wake() {
@@ -801,7 +849,8 @@ wait_for_source_after_wake() {
   local attempt=1
   local soak_seconds=$((SOAK_MINUTES * 60))
 
-  before="$(source_fingerprint)"
+  before="$(source_fingerprint_with_retry)" || die \
+    "Source could not be fingerprinted after $FINGERPRINT_MAX_ATTEMPTS attempts."
   if (( soak_seconds > 0 )); then
     info "Scheduled wake-up soak: waiting $SOAK_MINUTES minute(s)"
     sleep "$soak_seconds"
@@ -809,7 +858,8 @@ wait_for_source_after_wake() {
     info "Scheduled wake-up soak disabled; checking a $SOURCE_QUIET_SECONDS-second quiet window"
     sleep "$SOURCE_QUIET_SECONDS"
   fi
-  after="$(source_fingerprint)"
+  after="$(source_fingerprint_with_retry)" || die \
+    "Source could not be fingerprinted after the scheduled soak."
 
   [[ "$before" == "$after" ]] && {
     success "Source tree remained stable during the soak"
@@ -820,7 +870,11 @@ wait_for_source_after_wake() {
   before="$after"
   while (( attempt <= SOURCE_QUIET_MAX_ATTEMPTS )); do
     sleep "$SOURCE_QUIET_SECONDS"
-    after="$(source_fingerprint)"
+    if ! after="$(source_fingerprint_with_retry)"; then
+      warn "Source fingerprint is still unavailable; continuing the quiet-window checks."
+      attempt=$((attempt + 1))
+      continue
+    fi
     if [[ "$before" == "$after" ]]; then
       success "Source tree is stable after $SOURCE_QUIET_SECONDS seconds"
       return 0
@@ -875,9 +929,14 @@ run_backup() {
   printf 'Source: %s\n' "$SOURCE_PATH"
   printf 'Destination: %s\n' "$(repository_remote_spec)"
 
-  fingerprint_before="$(source_fingerprint)"
+  fingerprint_before="$(source_fingerprint_with_retry)" || die \
+    "Source could not be fingerprinted before backup."
   kopia_run snapshot create "$SOURCE_PATH"
-  fingerprint_after="$(source_fingerprint)"
+  if ! fingerprint_after="$(source_fingerprint_with_retry)"; then
+    warn "Could not fingerprint the source after backup; creating one follow-up snapshot."
+    kopia_run snapshot create "$SOURCE_PATH"
+    fingerprint_after="$fingerprint_before"
+  fi
 
   if [[ "$fingerprint_before" != "$fingerprint_after" ]]; then
     warn "Source changed while Kopia was reading it; creating one follow-up snapshot."

@@ -51,6 +51,11 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
   calendar day.
 - Apply MEGA connectivity retries, then a scheduled-only soak (10 minutes by
   default) and source quiet-window check before starting Kopia.
+- Retry transient source fingerprint failures and preserve their diagnostics in
+  the launchd log; persistent failures abort before snapshot creation.
+- Document macOS Full Disk Access for `/bin/bash` as a possible prerequisite
+  for unattended iCloud Drive backups. Do not attempt to bypass or grant macOS
+  privacy permissions programmatically; the user must make that explicit choice.
 - Include the whole vault, including `.obsidian/`.
 - Keep 14 daily, 8 weekly, and 12 monthly snapshots.
 - Use Kopia's encrypted repository defaults; do not add a second encryption layer.

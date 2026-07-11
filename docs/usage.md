@@ -228,6 +228,12 @@ automatic full maintenance later garbage-collects unreachable content. Cleanup
 is intentionally delayed by Kopia's safety windows and may take multiple
 maintenance cycles.
 
+Source fingerprinting retries transient `find`/`stat` failures three times and
+writes diagnostics to the backup log. This prevents a file that disappears or
+temporarily becomes unavailable during an iCloud update from aborting a
+scheduled run without explanation. Persistent fingerprint failures still stop
+the backup before Kopia reads the source.
+
 Kopia's daily maintenance checks snapshot structure and required blobs, but a
 full payload check requires `--verify`, which downloads, decrypts, and
 decompresses snapshot data. A successful snapshot followed by a failed
@@ -321,6 +327,33 @@ synchronized. The soak and quiet-window checks are therefore best-effort, not
 an atomic filesystem snapshot. If files change while Kopia is reading them, the
 script creates one follow-up snapshot. Continuous changes or unreadable files
 still cause the scheduled run to fail rather than claim a clean backup.
+
+### Scheduled iCloud access on macOS
+
+macOS privacy controls can allow an interactive Terminal session to read iCloud
+Drive while denying the same access to a background launchd process. The usual
+symptom is a scheduled exit code of `1` and this diagnostic in `backup.log`:
+
+```text
+find: /Users/.../Library/Mobile Documents/...: Operation not permitted
+```
+
+If this happens, open **System Settings → Privacy & Security → Full Disk
+Access**, click **+**, authenticate, press **Command-Shift-G** in the file
+chooser, enter `/bin/bash`, and add and enable it. Then run a short scheduled
+test before relying on the daily job. Start with `/bin/bash` only; do not add
+`find`, `stat`, or Kopia unless a later log names one of them as the denied
+process.
+
+This permission is broad: it applies to every Bash script executed as the
+current user, not just this backup script. Grant it only if that tradeoff is
+acceptable. A narrowly permissioned, signed application wrapper would avoid
+granting access to the shared Bash interpreter, but is intentionally outside
+this single-file project's scope.
+
+See Apple's documentation for
+[protected file locations](https://support.apple.com/guide/security/controlling-app-access-to-files-secddd1d86a6/web)
+and [Full Disk Access](https://support.apple.com/guide/mac-help/control-access-to-files-and-folders-on-mac-mchld5a35146/mac).
 
 ## Safe acceptance test
 

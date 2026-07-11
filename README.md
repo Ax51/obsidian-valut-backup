@@ -9,7 +9,9 @@ offsite backup layer and does not replace the existing sync workflow.
 > [!IMPORTANT]
 > If the vault is stored in iCloud Drive, enable **Keep Downloaded** for the
 > vault (or its enclosing Obsidian folder) in Finder before relying on scheduled
-> backups. See [Using an iCloud vault](docs/usage.md#using-an-icloud-vault).
+> backups. macOS may also require Full Disk Access for `/bin/bash` before a
+> background launchd job can read iCloud Drive. See
+> [Using an iCloud vault](docs/usage.md#using-an-icloud-vault).
 
 ## How it works
 
