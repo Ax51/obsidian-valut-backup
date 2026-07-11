@@ -68,6 +68,7 @@ KopiaUI destination fields require raw, unescaped paths; see the
 | `--no-schedule` | Does not delete or unload anything. | Skips installing or updating the launchd plist. An existing loaded schedule remains active. |
 | `--update-settings` | Rewrites `settings.sh` with the resulting values and may update rclone or Keychain credentials. | By itself, it is followed by an immediate backup and schedule reconciliation. |
 | `--verify` | Does not change saved settings. | After a successful immediate backup, downloads, decrypts, and verifies 100% of snapshot files. It does nothing when the backup is skipped. |
+| `--restore` | Does not change saved settings or retention. | Disables backup and schedule changes, then restores from the latest snapshot into the effective source after interactive warnings. |
 | `--inspect` | None. | Prints saved state and exits before dependency checks, repository access, self-update, backup, or schedule changes. Do not combine it with action flags. |
 | `--version` | None. | Prints the running file's version and exits. |
 | `-h`, `--help` | None. | Prints built-in help and exits. |
@@ -162,6 +163,46 @@ Do not combine `--verify` with `--no-immediate-backup`: verification is part of
 the backup flow and therefore will not run when snapshot creation is skipped.
 Similarly, `--source PATH --no-immediate-backup` neither saves nor backs up the
 override and has no useful source-related effect.
+
+## Restore into the configured source
+
+Use the installed command to restore from the latest complete snapshot for the
+saved source identity:
+
+```bash
+obsidian-backup --restore
+```
+
+Restore is always manual. It never creates a snapshot, installs or updates a
+schedule, changes retention, or runs through launchd. Close Obsidian and allow
+iCloud to finish synchronizing before starting.
+
+Each invocation asks two questions. The first selects the restore mode:
+
+- answer `No` (the default) to restore missing files and symlinks while skipping
+  everything that already exists. The snapshot is restored into a temporary
+  mode-`700` staging directory under the application directory, then macOS
+  `rsync --ignore-existing` copies only absent entries into the source without
+  updating metadata on directories that already exist;
+- answer `Yes` to allow existing files and symlinks to be overwritten by the
+  versions in the latest snapshot. Those versions may be older. Files that do
+  not exist in the snapshot are never deleted.
+
+The second `[y/N]` question authorizes the write. Pressing **Return** cancels
+without changing files. A cleanup trap removes temporary staging on normal exit
+and command failures; after a forced power loss, inspect the mode-`700`
+application directory for a leftover `restore-staging.*` directory. Kopia writes
+restored files atomically, and the same operation lock prevents a scheduled
+backup and restore from running together.
+
+`--restore` may be combined with `--source PATH` for a one-off source identity,
+but that exact normalized path must already have snapshot history. It cannot be
+combined with `--verify`, `--inspect`, `--update-settings`, or the internal
+`--scheduled-run` mode.
+
+For acceptance testing and full disaster recovery, continue restoring to a new
+directory through KopiaUI first. In-place `--restore` is intended for deliberate
+recovery after that workflow has already been validated.
 
 ## Inspect configuration and schedule
 

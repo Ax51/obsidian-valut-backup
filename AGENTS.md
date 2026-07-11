@@ -53,8 +53,14 @@ include tests for missing, equal, newer, and older installed versions.
 - Persist the selected source as an absolute normalized directory path. Never
   allow a scheduled backup to interpret a relative source against its current
   working directory.
-- Treat the selected vault as read-only. Restores must target a separate
-  directory during validation.
+- Treat the selected vault as read-only during backup. Validation restores must
+  target a separate directory. The only permitted in-place write is an explicit
+  manual `--restore` run after its per-run warning and confirmation; scheduled
+  execution must never restore.
+- Missing-only restore must stage the snapshot outside the vault and merge it
+  with `rsync --ignore-existing`; do not rely on Kopia's `--skip-existing` to
+  protect arbitrary existing files. The merge must not update metadata on
+  directories that already exist.
 - Do not create or reconnect a real remote repository in automated tests.
 - Do not make scheduled execution interactive.
 - Preserve the explicit disclaimer acceptance gate for first-time manual use.

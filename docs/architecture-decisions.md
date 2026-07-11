@@ -58,6 +58,12 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 - Treat each normalized source path as a separate Kopia snapshot history. A
   switch from a fixture to the real vault does not merge or rewrite old
   snapshots.
+- Keep backup mode read-only. Permit in-place writes only through the explicit,
+  manual `--restore` mode. It restores from the latest snapshot, defaults to
+  staging plus an `rsync --ignore-existing` merge, requires a second
+  confirmation before writing, never deletes extra files, and cannot run
+  through launchd. Overwrite mode is explicit and warns that snapshot versions
+  may be older.
 
 Kopia's own policy supports retention and snapshot scheduling, but `launchd` is
 the source of truth for this project. This keeps scheduling, Keychain access,

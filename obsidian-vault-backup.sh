@@ -5,7 +5,7 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="0.5.0"
+readonly SCRIPT_VERSION="0.6.0"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
 readonly SYSTEM_USER="$(id -un)"
@@ -47,6 +47,8 @@ UPDATE_SETTINGS=false
 INSTALL_SCHEDULE=true
 VERIFY_AFTER_BACKUP=false
 INSPECT_STATUS=false
+RESTORE_MODE=false
+RESTORE_STAGING_DIR=""
 SCHEDULED_RUN=false
 FIRST_CONFIGURATION=false
 REPOSITORY_CONNECTION_CHANGED=false
@@ -123,13 +125,15 @@ Depending on the selected options, this script may:
   • store a Kopia repository password in macOS Keychain;
   • create $LAUNCHD_PLIST;
   • optionally create a $SHELL_COMMAND_NAME symlink in Homebrew's bin directory;
-  • create encrypted backup data in your configured MEGA account; and
-  • read every file inside the source directory you select.
+  • create encrypted backup data in your configured MEGA account;
+  • read every file inside the source directory you select; and
+  • in explicit restore mode, write files into the selected source directory.
 
-The script is intended to read, not modify, the selected source directory.
-Nevertheless, backup and restore software can cause data loss when configured
-or used incorrectly. Test it with disposable data and verify a full restore
-before using it with important files.
+Backup mode is intended to read, not modify, the selected source directory.
+Restore mode intentionally writes to it only after a separate confirmation.
+Backup and restore software can cause data loss when configured or used
+incorrectly. Test it with disposable data and verify a full restore before
+using it with important files.
 
 By continuing, you confirm that you have read the project documentation,
 understand what the script does, accept all associated risks, and agree that
@@ -256,6 +260,7 @@ Options:
   --no-schedule          Do not install or update the launchd schedule.
   --update-settings      Interactively update saved settings and credentials.
   --verify               Verify 100% of snapshot files after the backup.
+  --restore              Restore from the latest snapshot into the saved source.
   --inspect              Show configuration and schedule status without changes.
   --version              Show the script version.
   -h, --help             Show this help.
@@ -268,6 +273,7 @@ Examples:
   ./obsidian-vault-backup.sh --no-immediate-backup
   ./obsidian-vault-backup.sh --source /tmp/TestVault --no-schedule
   ./obsidian-vault-backup.sh --update-settings
+  ./obsidian-vault-backup.sh --restore
   ./obsidian-vault-backup.sh --inspect
 EOF
   printf '\nFull documentation:\n  %s\n' "$PROJECT_URL"
@@ -300,6 +306,12 @@ parse_arguments() {
         VERIFY_AFTER_BACKUP=true
         shift
         ;;
+      --restore)
+        RESTORE_MODE=true
+        IMMEDIATE_BACKUP=false
+        INSTALL_SCHEDULE=false
+        shift
+        ;;
       --inspect)
         INSPECT_STATUS=true
         shift
@@ -322,6 +334,18 @@ parse_arguments() {
         ;;
     esac
   done
+}
+
+validate_argument_combinations() {
+  if [[ "$RESTORE_MODE" == true ]]; then
+    [[ "$SCHEDULED_RUN" == false ]] || die "--restore cannot run through launchd."
+    [[ "$VERIFY_AFTER_BACKUP" == false ]] || die \
+      "--restore cannot be combined with --verify."
+    [[ "$INSPECT_STATUS" == false ]] || die \
+      "--restore cannot be combined with --inspect."
+    [[ "$UPDATE_SETTINGS" == false ]] || die \
+      "Update settings in a separate run before using --restore."
+  fi
 }
 
 
@@ -727,22 +751,24 @@ ensure_repository_connection() {
   if [[ -f "$KOPIA_CONFIG_FILE" ]] && kopia_run repository status >/dev/null 2>&1; then
     success "Connected to the existing Kopia repository"
   else
-    [[ "$SCHEDULED_RUN" == false ]] || die \
+    [[ "$SCHEDULED_RUN" == false && "$RESTORE_MODE" == false ]] || die \
       "Kopia repository is not connected. Run the script manually."
     [[ -f "$KOPIA_CONFIG_FILE" ]] && mv \
       "$KOPIA_CONFIG_FILE" "$KOPIA_CONFIG_FILE.invalid.$(date '+%Y%m%d%H%M%S')"
     connect_or_create_repository
   fi
 
-  kopia_run policy set --global \
-    --keep-latest=0 \
-    --keep-hourly=0 \
-    --keep-daily=14 \
-    --keep-weekly=8 \
-    --keep-monthly=12 \
-    --keep-annual=0 \
-    --ignore-identical-snapshots=true >/dev/null
-  success "Retention policy is active: 14 daily, 8 weekly, 12 monthly"
+  if [[ "$RESTORE_MODE" == false ]]; then
+    kopia_run policy set --global \
+      --keep-latest=0 \
+      --keep-hourly=0 \
+      --keep-daily=14 \
+      --keep-weekly=8 \
+      --keep-monthly=12 \
+      --keep-annual=0 \
+      --ignore-identical-snapshots=true >/dev/null
+    success "Retention policy is active: 14 daily, 8 weekly, 12 monthly"
+  fi
 }
 
 
@@ -750,9 +776,18 @@ ensure_repository_connection() {
 
 acquire_backup_lock() {
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    die "Another backup appears to be running. If it is not, remove $LOCK_DIR"
+    die "Another backup or restore appears to be running. If it is not, remove $LOCK_DIR"
   fi
-  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+  trap 'cleanup_operation' EXIT
+}
+
+cleanup_operation() {
+  if [[ -n "$RESTORE_STAGING_DIR" && \
+        "$RESTORE_STAGING_DIR" == "$APP_DIR"/restore-staging.* && \
+        -d "$RESTORE_STAGING_DIR" ]]; then
+    rm -rf "$RESTORE_STAGING_DIR"
+  fi
+  rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
 source_fingerprint() {
@@ -857,6 +892,57 @@ run_backup() {
     kopia_run snapshot verify --verify-files-percent=100
     success "Repository verification completed"
   fi
+}
+
+run_restore() {
+  local overwrite_existing=false
+
+  acquire_backup_lock
+  info "Restore from the latest snapshot"
+  printf 'Source history: %s\n' "$SOURCE_PATH"
+  printf 'Restore destination: %s\n' "$SOURCE_PATH"
+  warn "Restore mode writes directly into the configured source directory."
+  warn "Close Obsidian and make sure iCloud has finished synchronizing first."
+
+  if confirm "Overwrite existing files and symlinks with snapshot versions?"; then
+    overwrite_existing=true
+    warn "Existing files may be replaced with older versions from the latest snapshot."
+    printf 'Files created after that snapshot will not be deleted.\n'
+  else
+    printf 'Mode: restore missing files and symlinks only; existing ones will be skipped.\n'
+  fi
+
+  confirm "Start restore from the latest snapshot now?" || {
+    printf 'Restore cancelled. No files were changed.\n'
+    return 0
+  }
+
+  if [[ "$overwrite_existing" == true ]]; then
+    kopia_run snapshot restore "$SOURCE_PATH" "$SOURCE_PATH" \
+      --snapshot-time=latest \
+      --overwrite-files \
+      --overwrite-directories \
+      --overwrite-symlinks \
+      --write-files-atomically
+  else
+    command -v rsync >/dev/null 2>&1 || die "macOS rsync utility was not found."
+    RESTORE_STAGING_DIR="$(mktemp -d "$APP_DIR/restore-staging.XXXXXX")"
+    chmod 700 "$RESTORE_STAGING_DIR"
+    info "Restoring the latest snapshot into a temporary staging directory"
+    kopia_run snapshot restore "$SOURCE_PATH" "$RESTORE_STAGING_DIR" \
+      --snapshot-time=latest \
+      --write-files-atomically
+    info "Copying only missing files and symlinks into the configured source"
+    rsync -a \
+      --ignore-existing \
+      --omit-dir-times \
+      --no-perms \
+      --no-owner \
+      --no-group \
+      "$RESTORE_STAGING_DIR/" "$SOURCE_PATH/"
+  fi
+
+  success "Restore from the latest snapshot completed"
 }
 
 
@@ -1055,19 +1141,25 @@ inspect_status() {
 
 main() {
   parse_arguments "$@"
+  validate_argument_combinations
 
   if [[ "$INSPECT_STATUS" == true ]]; then
     inspect_status
     exit 0
   fi
 
-  if ! load_settings && [[ "$SCHEDULED_RUN" == true ]]; then
-    die "Settings are missing: $SETTINGS_FILE"
+  if ! load_settings; then
+    if [[ "$SCHEDULED_RUN" == true ]]; then
+      die "Settings are missing: $SETTINGS_FILE"
+    fi
+    if [[ "$RESTORE_MODE" == true ]]; then
+      die "Restore requires an existing configuration and snapshot history."
+    fi
   fi
   ensure_disclaimer_acceptance
 
   if [[ -n "${SOURCE_PATH:-}" && "$SOURCE_PATH" != /* ]]; then
-    if [[ "$SCHEDULED_RUN" == true ]]; then
+    if [[ "$SCHEDULED_RUN" == true || "$RESTORE_MODE" == true ]]; then
       die "Saved source path is relative: $SOURCE_PATH. Run the script manually to update settings."
     fi
     warn "Saved source path is relative and ambiguous: $SOURCE_PATH"
@@ -1104,10 +1196,17 @@ main() {
   fi
 
   load_settings || die "Settings are missing: $SETTINGS_FILE"
-  offer_shell_command
+  if [[ "$RESTORE_MODE" == false ]]; then
+    offer_shell_command
+  fi
   apply_cli_overrides
   validate_effective_settings
   ensure_repository_connection
+
+  if [[ "$RESTORE_MODE" == true ]]; then
+    run_restore
+    exit 0
+  fi
 
   if [[ "$IMMEDIATE_BACKUP" == true ]]; then
     run_backup

@@ -98,6 +98,7 @@ prompt directly.
 --no-schedule          Do not install or update the launchd schedule.
 --update-settings      Update saved settings and credentials interactively.
 --verify               Verify 100% of snapshot files after the backup.
+--restore              Restore the latest snapshot into the saved source.
 --inspect              Show configuration and schedule status without changes.
 --version              Show the script version.
 -h, --help             Show built-in help.
@@ -113,6 +114,17 @@ For example, configure everything without performing the first backup:
 an existing launchd job. `--source` applies only to the current process and is
 never saved. For exact side effects and safe combinations, see
 [Options and common flag combinations](docs/usage.md#options).
+
+To restore into the configured source from its latest snapshot:
+
+```bash
+obsidian-backup --restore
+```
+
+Every restore is manual and disables backup and schedule changes for that run.
+The script first asks whether existing files may be overwritten; the default
+restores the snapshot to protected staging and copies only missing files into
+the source. It then requires a separate confirmation before writing anything.
 
 Update settings later using the installed copy:
 
