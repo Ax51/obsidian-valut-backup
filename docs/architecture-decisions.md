@@ -53,14 +53,18 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
 Kopia's own policy supports retention and a snapshot interval, but `launchd` is
 the source of truth for this project. This keeps scheduling, Keychain access,
 logging, and retry behaviour in one macOS-native entry point. The Kopia policy
-uses manual scheduling to avoid duplicate runs.
+does not configure an automatic snapshot interval, avoiding duplicate runs.
 
 The complete operational flow is distributed as one standalone script. On its
 first interactive run it copies itself to
-`~/config/obsidian-vault-backup/obsidian-vault-backup.sh`, where the launchd
+`~/.config/obsidian-vault-backup/obsidian-vault-backup.sh`, where the launchd
 agent can invoke it from a stable path. The same directory contains the user's
 settings and the Kopia connection. The MEGA remote uses rclone's standard
 config location so that Kopia CLI and KopiaUI can both discover it.
+
+The script carries a semantic version. Manual runs atomically refresh the
+installed copy only when the running version is newer. Equal versions are a
+no-op, while an older copy is prevented from overwriting a newer installation.
 
 ## Security and recovery
 

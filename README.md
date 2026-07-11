@@ -46,18 +46,25 @@ copy so it can install itself at a stable path for scheduled runs.
 
 During the first run, the script:
 
-1. checks that it is running on macOS;
-2. offers to install Homebrew when necessary;
-3. offers to install Kopia, rclone, and KopiaUI;
-4. asks for the source directory and MEGA credentials;
-5. creates or connects to an encrypted Kopia repository;
-6. runs the first backup immediately; and
-7. installs one `launchd` schedule without creating duplicates.
+1. displays a risk and filesystem-change disclaimer that must be explicitly
+   accepted with `[y/N]` on the first run;
+2. checks that it is running on macOS;
+3. offers to install Homebrew when necessary;
+4. offers to install Kopia, rclone, and KopiaUI;
+5. asks for the source directory and MEGA credentials;
+6. creates or connects to an encrypted Kopia repository;
+7. runs the first backup immediately; and
+8. installs one `launchd` schedule without creating duplicates.
+
+After acceptance, the script records `DISCLAIMER_ACCEPTED=true` and an
+acceptance timestamp in `~/.config/obsidian-vault-backup/settings.sh`. Later
+manual and scheduled runs read that setting and do not ask again. Declining
+exits before the script writes configuration or performs backup actions.
 
 Settings and the permanent script are stored under:
 
 ```text
-~/config/obsidian-vault-backup
+~/.config/obsidian-vault-backup
 ```
 
 ## Command-line options
@@ -69,6 +76,7 @@ Settings and the permanent script are stored under:
 --no-schedule          Do not install or inspect the launchd schedule.
 --update-settings      Update saved settings and credentials interactively.
 --verify               Verify 100% of snapshot files after the backup.
+--version              Show the script version.
 -h, --help             Show built-in help.
 ```
 
@@ -81,8 +89,13 @@ For example, configure everything without performing the first backup:
 Update settings later using the installed copy:
 
 ```bash
-~/config/obsidian-vault-backup/obsidian-vault-backup.sh --update-settings
+~/.config/obsidian-vault-backup/obsidian-vault-backup.sh --update-settings
 ```
+
+Every manual run from a downloaded file compares its version with the installed
+copy. A newer version atomically refreshes the installed script, an equal
+version leaves it untouched, and an older script cannot overwrite a newer
+installed version.
 
 ## Test before using the real vault
 

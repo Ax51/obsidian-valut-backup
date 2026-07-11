@@ -19,16 +19,23 @@ Downloading to a file is intentional: the script installs a permanent copy for
 
 The first run:
 
-1. checks that the computer is running macOS;
-2. offers to install Homebrew if it is missing;
-3. offers to install `kopia` and `rclone`, plus the optional KopiaUI app;
-4. asks for the vault path, MEGA credentials, remote folder, and schedule;
-5. stores non-secret settings under `~/config/obsidian-vault-backup` and the
+1. displays a disclaimer and requires explicit `[y/N]` confirmation before it
+   installs software, writes operational configuration, or starts a backup;
+2. checks that the computer is running macOS;
+3. offers to install Homebrew if it is missing;
+4. offers to install `kopia` and `rclone`, plus the optional KopiaUI app;
+5. asks for the vault path, MEGA credentials, remote folder, and schedule;
+6. stores non-secret settings under `~/.config/obsidian-vault-backup` and the
    MEGA remote in rclone's standard config so KopiaUI can see it;
-6. stores the Kopia repository password in macOS Keychain;
-7. creates or connects to the encrypted repository;
-8. runs a backup immediately; and
-9. installs one `launchd` schedule if it is not already present.
+7. stores the Kopia repository password in macOS Keychain;
+8. creates or connects to the encrypted repository;
+9. runs a backup immediately; and
+10. installs one `launchd` schedule if it is not already present.
+
+Acceptance and its UTC timestamp are stored in `settings.sh`, so the disclaimer
+is not shown again after the user agrees. Declining does not write an acceptance
+record. The internal `--scheduled-run` mode is deliberately non-interactive so
+launchd backups can complete unattended.
 
 The standard rclone config contains an obscured MEGA password. Obscuring
 prevents casual reading but is not strong encryption. rclone prints the config
@@ -45,8 +52,14 @@ Passwords as independent recovery records.
 --no-schedule          Do not install or inspect the launchd schedule.
 --update-settings      Interactively update saved settings and credentials.
 --verify               Verify 100% of snapshot files after backup.
+--version              Show the script version.
 -h, --help             Show built-in help.
 ```
+
+On every manual run from another location, the script compares its semantic
+version with the copy in `~/.config/obsidian-vault-backup`. A newer version
+refreshes the installed copy atomically, an equal version is a no-op, and an
+older version stops instead of overwriting a newer installation.
 
 Changing the remote name or remote folder is done through `--update-settings`,
 because those values identify the repository rather than just one backup run.
@@ -62,7 +75,7 @@ vault. Put several Markdown files and a `.obsidian` directory in it, run a
 backup, edit the files, and run the installed script again:
 
 ```bash
-~/config/obsidian-vault-backup/obsidian-vault-backup.sh --no-schedule --verify
+~/.config/obsidian-vault-backup/obsidian-vault-backup.sh --no-schedule --verify
 ```
 
 Open KopiaUI, choose **Rclone Remote**, and connect using the rclone executable,
@@ -73,7 +86,7 @@ snapshot, and restore it into a separate folder. After this passes, update the
 source path:
 
 ```bash
-~/config/obsidian-vault-backup/obsidian-vault-backup.sh \
+~/.config/obsidian-vault-backup/obsidian-vault-backup.sh \
   --update-settings --no-immediate-backup
 ```
 
@@ -83,7 +96,7 @@ schedule.
 ## Files created on the Mac
 
 ```text
-~/config/obsidian-vault-backup/
+~/.config/obsidian-vault-backup/
 ├── obsidian-vault-backup.sh  permanent runnable copy
 ├── settings.sh               source, remote, and interval settings
 ├── repository.config         Kopia connection metadata
