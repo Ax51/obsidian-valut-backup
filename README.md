@@ -133,6 +133,7 @@ overwriting the live vault.
 
 - [Standalone backup script](obsidian-vault-backup.sh)
 - [Setup, acceptance test, and restore guide](docs/usage.md)
+- [Connect KopiaUI and restore an existing backup](docs/kopia-ui.md)
 - [Architecture decisions](docs/architecture-decisions.md)
 
 ## Current status

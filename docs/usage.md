@@ -85,6 +85,9 @@ available to KopiaUI too. Confirm that both revisions can be browsed, mount a
 snapshot, and restore it into a separate folder. After this passes, update the
 source path:
 
+See the complete [KopiaUI connection and restore guide](kopia-ui.md) for exact
+fields, password retrieval, validation, and troubleshooting.
+
 ```bash
 ~/.config/obsidian-vault-backup/obsidian-vault-backup.sh \
   --update-settings --no-immediate-backup
