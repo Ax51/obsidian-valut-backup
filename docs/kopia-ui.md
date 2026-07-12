@@ -114,9 +114,12 @@ Monthly snapshots:             12
 Weekly snapshots:               8
 Daily snapshots:               14
 Hourly snapshots:               0
-Latest snapshots:               0
+Latest snapshots:               1
 Ignore identical snapshots:  true
 ```
+
+The latest-snapshot slot ensures that at least one recovery point remains even
+if an unchanged vault produces no new snapshots for an extended period.
 
 ## Restore the whole vault
 

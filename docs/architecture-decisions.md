@@ -61,7 +61,9 @@ KopiaUI is available separately for browsing, mounting, and restoring snapshots.
   `--check-icloud-access` for retrying after a denial or Kopia upgrade. The
   preflight must not create a snapshot or mutate the repository.
 - Include the whole vault, including `.obsidian/`.
-- Keep 14 daily, 8 weekly, and 12 monthly snapshots.
+- Always keep the latest snapshot, plus 14 daily, 8 weekly, and 12 monthly
+  snapshots. This preserves a recovery point even when an unchanged source
+  produces no new snapshots for longer than the time-based retention windows.
 - Use Kopia's encrypted repository defaults; do not add a second encryption layer.
 - Keep the vault path in user configuration, never hard-code a personal iCloud
   path, and persist it only as a normalized absolute directory path.

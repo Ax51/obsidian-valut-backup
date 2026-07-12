@@ -5,7 +5,7 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="1.3.2"
+readonly SCRIPT_VERSION="1.3.3"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly REMOTE_SCRIPT_URL="https://raw.githubusercontent.com/Ax51/obsidian-valut-backup/refs/heads/main/obsidian-vault-backup.sh"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
@@ -882,14 +882,14 @@ ensure_repository_connection() {
 
   if [[ "$RESTORE_MODE" == false ]]; then
     kopia_run policy set --global \
-      --keep-latest=0 \
+      --keep-latest=1 \
       --keep-hourly=0 \
       --keep-daily=14 \
       --keep-weekly=8 \
       --keep-monthly=12 \
       --keep-annual=0 \
       --ignore-identical-snapshots=true >/dev/null
-    success "Retention policy is active: 14 daily, 8 weekly, 12 monthly"
+    success "Retention policy is active: latest snapshot, 14 daily, 8 weekly, 12 monthly"
   fi
 }
 

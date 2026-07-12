@@ -33,8 +33,9 @@ MEGA repository
 - **launchd** runs the backup automatically on macOS.
 - **KopiaUI** provides visual history browsing, mounting, and restores.
 
-The default retention policy keeps 14 daily, 8 weekly, and 12 monthly
-snapshots. The whole selected directory is backed up, including `.obsidian/`.
+The default retention policy always keeps the latest snapshot, plus 14 daily,
+8 weekly, and 12 monthly snapshots. The whole selected directory is backed up,
+including `.obsidian/`.
 
 ## Quick start
 

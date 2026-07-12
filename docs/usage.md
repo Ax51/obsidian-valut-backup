@@ -241,6 +241,11 @@ times and writes diagnostics to the log. Scheduled runs deliberately do not
 walk an iCloud source with these general-purpose shell tools: macOS can grant
 Kopia narrow File Provider access without granting Full Disk Access to Bash.
 
+The global retention policy always keeps the latest snapshot, plus 14 daily,
+8 weekly, and 12 monthly snapshots. Keeping the latest snapshot separately
+protects the final recovery point when an unchanged vault produces no new
+snapshots for an extended period.
+
 Kopia's daily maintenance checks snapshot structure and required blobs, but a
 full payload check requires `--verify`, which downloads, decrypts, and
 decompresses snapshot data. A successful snapshot followed by a failed
