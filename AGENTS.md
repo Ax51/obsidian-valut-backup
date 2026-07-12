@@ -72,8 +72,10 @@ include tests for missing, equal, newer, and older installed versions.
   replace it with `StartInterval` without an explicit architecture decision.
 - Apply soak, source-settling, and remote-connectivity preflight only to
   scheduled runs. Manual backups should start immediately.
-- Keep `--inspect` read-only and non-interactive; it must not connect to the
-  remote repository or mutate configuration.
+- Keep `--inspect` status collection read-only; it must not connect to the
+  remote repository or mutate configuration. Its only interactive or mutating
+  behavior may be the manual self-update check and confirmed atomic replacement
+  of the running script.
 - Kopia owns encryption and retention; `launchd` owns scheduling.
 
 ## Required validation

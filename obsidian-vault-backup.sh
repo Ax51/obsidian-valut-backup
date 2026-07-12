@@ -5,7 +5,7 @@ set -euo pipefail
 # ====== 1. Application constants and defaults ================================
 
 readonly APP_NAME="obsidian-vault-backup"
-readonly SCRIPT_VERSION="1.3.3"
+readonly SCRIPT_VERSION="1.3.4"
 readonly PROJECT_URL="https://github.com/Ax51/obsidian-valut-backup"
 readonly REMOTE_SCRIPT_URL="https://raw.githubusercontent.com/Ax51/obsidian-valut-backup/refs/heads/main/obsidian-vault-backup.sh"
 readonly SHELL_COMMAND_NAME="obsidian-backup"
@@ -279,7 +279,7 @@ Options:
   --verify               Verify 100% of snapshot files after the backup.
   --restore              Restore from the latest snapshot into the saved source.
   --check-icloud-access  Run the background Kopia permission check again.
-  --inspect              Show configuration and schedule status without changes.
+  --inspect              Check for updates, then show configuration and schedule status.
   --version              Show the script version.
   -h, --help             Show this help.
 
@@ -1466,13 +1466,13 @@ main() {
   parse_arguments "$@"
   validate_argument_combinations
 
+  if [[ "$SCHEDULED_RUN" == false && "$ICLOUD_PERMISSION_RUN" == false ]]; then
+    check_for_remote_update "$@"
+  fi
+
   if [[ "$INSPECT_STATUS" == true ]]; then
     inspect_status
     exit 0
-  fi
-
-  if [[ "$SCHEDULED_RUN" == false && "$ICLOUD_PERMISSION_RUN" == false ]]; then
-    check_for_remote_update "$@"
   fi
 
   if ! load_settings; then

@@ -104,7 +104,7 @@ prompt directly.
 --verify               Verify 100% of snapshot files after the backup.
 --restore              Restore the latest snapshot into the saved source.
 --check-icloud-access  Repeat the background Kopia permission check.
---inspect              Show configuration and schedule status without changes.
+--inspect              Check for updates, then show configuration and schedule status.
 --version              Show the script version.
 -h, --help             Show built-in help.
 ```
@@ -156,14 +156,15 @@ See [Failed and interrupted runs](docs/usage.md#failed-and-interrupted-runs) for
 network failures, incomplete snapshots, verification, and closing the lid
 during an active operation.
 
-Every action-oriented manual run checks the latest script on GitHub. If a newer
-version is available, the script asks whether to download it atomically and
-restart with that version. A failed check or a declined update leaves the run
-unchanged. The downloaded file is also compared with the installed copy: a
-newer version atomically refreshes the installed script, an equal version leaves
-it untouched, and an older script cannot overwrite a newer installed version.
-`--help`, `--version`, and `--inspect` exit without network access or changing
-the installed copy.
+Every manual run except `--help` and `--version` checks the latest script on
+GitHub. If a newer version is available, the script asks whether to download it
+atomically and restart with that version. A failed check or a declined update
+leaves the run unchanged. The downloaded file is also compared with the
+installed copy: a newer version atomically refreshes the installed script, an
+equal version leaves it untouched, and an older script cannot overwrite a newer
+installed version.
+`--inspect` performs only this update check before reporting status; it still
+does not access the backup repository or change backup configuration.
 
 ## Test before using the real vault
 

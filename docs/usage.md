@@ -72,7 +72,7 @@ KopiaUI destination fields require raw, unescaped paths; see the
 | `--verify` | Does not change saved settings. | After a successful immediate backup, downloads, decrypts, and verifies 100% of snapshot files. It does nothing when the backup is skipped. |
 | `--restore` | Does not change saved settings or retention. | Disables backup and schedule changes, then restores from the latest snapshot into the effective source after interactive warnings. |
 | `--check-icloud-access` | Refreshes the local permission-check state after success. | Runs a one-time launchd probe in which Kopia estimates the source without creating or uploading a snapshot. Use it after initially denying access or after changing the permission in System Settings. |
-| `--inspect` | None. | Prints saved state and exits before dependency checks, repository access, self-update, backup, or schedule changes. Do not combine it with action flags. |
+| `--inspect` | May replace the running script after confirmation when a newer version is available. | Checks for a script update, then prints saved state and exits before dependency checks, repository access, backup, or schedule changes. Do not combine it with action flags. |
 | `--version` | None. | Prints the running file's version and exits. |
 | `-h`, `--help` | None. | Prints built-in help and exits. |
 
@@ -91,16 +91,19 @@ because launchd reads `settings.sh` at runtime—even if that settings update us
 `--no-schedule`. The flag prevents plist changes; it does not pause an already
 loaded job.
 
-Action-oriented manual runs first download the script from the project's GitHub
-`main` branch and compare its `SCRIPT_VERSION` with the running version. When a
-newer version is available, the script asks for confirmation. Accepting the
-offer replaces the running file atomically and restarts it; declining it, or a
-failed download, continues the current run. Scheduled runs never perform this
-check and never prompt. The running version is then compared with the copy in
+Manual runs other than `--help` and `--version` first download the script from
+the project's GitHub `main` branch and compare its `SCRIPT_VERSION` with the
+running version. When a newer version is available, the script asks for
+confirmation. Accepting the offer replaces the running file atomically and
+restarts it; declining it, or a failed download, continues the current run.
+Scheduled runs never perform this check and never prompt. The running version
+is then compared with the copy in
 `~/.config/obsidian-vault-backup`: a newer version refreshes the installed copy
 atomically, an equal version is a no-op, and an older version stops instead of
-overwriting a newer installation. Read-only `--help`, `--version`, and
-`--inspect` calls exit before the network check and installed-copy update.
+overwriting a newer installation during action-oriented runs. `--inspect` does
+the network update check and may replace its running file after confirmation,
+but it exits before the installed-copy synchronization and all backup setup.
+`--help` and `--version` exit before the network check.
 
 ## Optional shell command
 
